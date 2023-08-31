@@ -1,11 +1,13 @@
 package strava
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"log/slog"
 	"os"
 
+	"github.com/stevenpelley/strava3golang"
 	"golang.org/x/oauth2"
 )
 
@@ -40,6 +42,16 @@ func CreateToken() *oauth2.Token {
 	}
 
 	return &token
+}
+
+func CreateStravaClient() *strava3golang.APIClient {
+	conf := CreateOauthConfig()
+	token := CreateToken()
+
+	client := conf.Client(context.Background(), token)
+	stravaApiConfig := strava3golang.NewConfiguration()
+	stravaApiConfig.HTTPClient = client
+	return strava3golang.NewAPIClient(stravaApiConfig)
 }
 
 func InitLogging(logFile string) {
