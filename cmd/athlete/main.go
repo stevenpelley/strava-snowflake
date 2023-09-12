@@ -9,10 +9,10 @@ import (
 )
 
 func main() {
-	strava.InitLogging("strava.log")
+	strava.InitLogging("athlete.log")
 	stravaClient := strava.CreateStravaClient()
-	detailedAthlete, _, err := stravaClient.AthletesAPI.GetLoggedInAthleteExecute(
-		stravaClient.AthletesAPI.GetLoggedInAthlete(context.Background()))
+	detailedAthlete, _, err :=
+		stravaClient.AthletesAPI.GetLoggedInAthlete(context.Background()).Execute()
 	if err != nil {
 		log.Panicf("error retrieving athlete: %v", err)
 		return

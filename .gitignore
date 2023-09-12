@@ -2,4 +2,8 @@
 /oauth_client_config.json
 /token.json
 /strava.log
-/.strava.log.swp
+*.log
+*.log.swp
+activities
+activities.json
+duck.sql

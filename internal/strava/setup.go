@@ -3,6 +3,7 @@ package strava
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -55,13 +56,21 @@ func CreateStravaClient() *strava3golang.APIClient {
 }
 
 func InitLogging(logFile string) {
-	// If the file doesn't exist, create it or append to the file
-	file, err := os.OpenFile(logFile,
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-	if err != nil {
-		log.Fatal(err)
+	var writer io.Writer = nil
+	if logFile == "" {
+		// use stderr
+		writer = os.Stderr
+
+	} else {
+		// If the file doesn't exist, create it or append to the file
+		file, err := os.OpenFile(logFile,
+			os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+		if err != nil {
+			log.Fatal(err)
+		}
+		writer = file
 	}
 
-	logger := slog.New(slog.NewJSONHandler(file, nil))
+	logger := slog.New(slog.NewJSONHandler(writer, nil))
 	slog.SetDefault(logger)
 }
