@@ -4,6 +4,6 @@
 /strava.log
 *.log
 *.log.swp
-activities
-activities.json
+/activities
+/activities.json
 duck.sql

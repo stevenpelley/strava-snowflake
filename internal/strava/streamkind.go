@@ -3,43 +3,43 @@ package strava
 type StreamKind string
 
 const (
-	time           StreamKind = "time"
-	distance       StreamKind = "distance"
-	latlng         StreamKind = "latlng"
-	altitude       StreamKind = "altitude"
-	velicitySmooth StreamKind = "velocity_smooth"
-	heartrate      StreamKind = "heartrate"
-	cadence        StreamKind = "cadence"
-	watts          StreamKind = "watts"
-	temp           StreamKind = "temp"
-	moving         StreamKind = "moving"
-	grade_smooth   StreamKind = "grade_smooth"
+	StreamTime           StreamKind = "time"
+	StreamDistance       StreamKind = "distance"
+	StreamLatlng         StreamKind = "latlng"
+	StreamAltitude       StreamKind = "altitude"
+	StreamVelicitySmooth StreamKind = "velocity_smooth"
+	StreamHeartrate      StreamKind = "heartrate"
+	StreamCadence        StreamKind = "cadence"
+	StreamWatts          StreamKind = "watts"
+	StreamTemp           StreamKind = "temp"
+	StreamMoving         StreamKind = "moving"
+	StreamGradeSmooth    StreamKind = "grade_smooth"
 )
 
 var AllStreamKinds []StreamKind = []StreamKind{
-	time,
-	distance,
-	latlng,
-	altitude,
-	velicitySmooth,
-	heartrate,
-	cadence,
-	watts,
-	temp,
-	moving,
-	grade_smooth,
+	StreamTime,
+	StreamDistance,
+	StreamLatlng,
+	StreamAltitude,
+	StreamVelicitySmooth,
+	StreamHeartrate,
+	StreamCadence,
+	StreamWatts,
+	StreamTemp,
+	StreamMoving,
+	StreamGradeSmooth,
 }
 
 var AllStreamKindsString []string = []string{
-	string(time),
-	string(distance),
-	string(latlng),
-	string(altitude),
-	string(velicitySmooth),
-	string(heartrate),
-	string(cadence),
-	string(watts),
-	string(temp),
-	string(moving),
-	string(grade_smooth),
+	string(StreamTime),
+	string(StreamDistance),
+	string(StreamLatlng),
+	string(StreamAltitude),
+	string(StreamVelicitySmooth),
+	string(StreamHeartrate),
+	string(StreamCadence),
+	string(StreamWatts),
+	string(StreamTemp),
+	string(StreamMoving),
+	string(StreamGradeSmooth),
 }

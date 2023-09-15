@@ -7,7 +7,7 @@ require (
 	golang.org/x/oauth2 v0.11.0
 )
 
-require github.com/fatih/structs v1.1.0 // indirect
+require github.com/fatih/structs v1.1.0
 
 require (
 	github.com/golang/protobuf v1.5.3 // indirect
