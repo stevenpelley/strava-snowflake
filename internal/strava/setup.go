@@ -71,6 +71,7 @@ func InitLogging(logFile string) {
 		writer = file
 	}
 
-	logger := slog.New(slog.NewJSONHandler(writer, nil))
+	handlerOptions := slog.HandlerOptions{AddSource: true, Level: slog.LevelDebug}
+	logger := slog.New(slog.NewJSONHandler(writer, &handlerOptions))
 	slog.SetDefault(logger)
 }

@@ -14,27 +14,37 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type ActivitiesConfig struct {
+	StravaClient              *strava3golang.APIClient
+	StartTime                 time.Time
+	EndTime                   time.Time
+	GetStreamsConcurrency     int
+	ActivitiesTimeoutDuration time.Duration
+	StreamsTimeoutDuration    time.Duration
+	ActivityIdsToIgnore       map[int64]struct{}
+	ActivitiesPerPage         int
+	PreStreamSleep            time.Duration
+}
+
 const activitiesPageSize int32 = 30
 
-func RetrieveActivities(stravaClient *strava3golang.APIClient, start time.Time, end time.Time) (
+func RetrieveActivities(config *ActivitiesConfig) (
 	[]strava3golang.SummaryActivity, error) {
-	startUnixTime := start.UTC().Unix()
-	endUnixTime := end.UTC().Unix()
+	startUnixTime := config.StartTime.UTC().Unix()
+	endUnixTime := config.EndTime.UTC().Unix()
 	after := int32(startUnixTime)
 	before := int32(endUnixTime)
 
 	var currentPage int32 = 1
 	var itemsInPage int = 0
 	allActivities := make([]strava3golang.SummaryActivity, 0)
-	timeoutDuration, err := time.ParseDuration("30s")
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancelFunc := context.WithTimeout(context.Background(), timeoutDuration)
+	ctx, cancelFunc := context.WithTimeout(
+		context.Background(), config.ActivitiesTimeoutDuration)
 	defer cancelFunc()
 
 	for currentPage == 1 || int32(itemsInPage) == activitiesPageSize {
-		activities, _, err := stravaClient.ActivitiesAPI.GetLoggedInAthleteActivities(
+		slog.Debug("gettig activity page", "current_page", currentPage)
+		activities, _, err := config.StravaClient.ActivitiesAPI.GetLoggedInAthleteActivities(
 			ctx).
 			After(after).
 			Before(before).
@@ -42,7 +52,7 @@ func RetrieveActivities(stravaClient *strava3golang.APIClient, start time.Time, 
 			Page(currentPage).
 			Execute()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error retrieving activity page: %w", err)
 		}
 		allActivities = append(allActivities, activities...)
 		itemsInPage = len(activities)
@@ -52,33 +62,45 @@ func RetrieveActivities(stravaClient *strava3golang.APIClient, start time.Time, 
 	return allActivities, nil
 }
 
-func RetrieveStreams(stravaClient *strava3golang.APIClient, activityIds []int64) (
-	[]*strava3golang.StreamSet, error) {
-	d, err := time.ParseDuration("10s")
-	if err != nil {
-		log.Panicf("error parsing duration: %v", err)
-	}
-	ctx, cancelFunc := context.WithTimeout(context.Background(), d)
+func RetrieveStreams(config *ActivitiesConfig, activityIds []int64) ([]*strava3golang.StreamSet, error) {
+	ctx, cancelFunc := context.WithTimeout(context.Background(), config.StreamsTimeoutDuration)
 	defer cancelFunc()
 	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(config.GetStreamsConcurrency)
 	streams := make([]*strava3golang.StreamSet, len(activityIds))
 	for i, activityId := range activityIds {
 		i, activityId := i, activityId // bind to iteration-specific variable for closure
 		g.Go(func() error {
-			streamSet, _, err := stravaClient.StreamsAPI.GetActivityStreams(ctx, activityId).
+			select {
+			case val, ok := <-ctx.Done():
+				if ok {
+					log.Panicf("unexpected value from context Done channel: %v", val)
+				} else {
+					return fmt.Errorf("context is Done at beginning of task: %v", ctx.Err())
+				}
+			default:
+				// not yet cancelled, proceed without blocking
+			}
+
+			slog.Debug("sleeping prior to retrieving stream", "activity_id", activityId, "activity_index", i)
+			time.Sleep(config.PreStreamSleep)
+			slog.Debug("retrieving stream", "activity_id", activityId, "activity_index", i)
+			streamSet, _, err := config.StravaClient.StreamsAPI.GetActivityStreams(ctx, activityId).
 				KeyByType(true).
 				Keys(AllStreamKindsString).
 				Execute()
 			if err != nil {
+				slog.Warn("error retrieving stream", "activity_id", activityId, "activity_index", i, "error", err)
 				return fmt.Errorf(
 					"error retrieving activity stream. id: %v. activity index: %v. error: %w",
 					activityId, i, err)
 			}
+			slog.Debug("retrieved stream successfully", "activity_id", activityId, "activity_index", i)
 			streams[i] = streamSet
 			return nil
 		})
 	}
-	err = g.Wait()
+	err := g.Wait()
 	return streams, err
 }
 
@@ -131,16 +153,11 @@ type ActivityAndStream struct {
 	StreamSet *strava3golang.StreamSet
 }
 
-func GetActivitiesAndStreams(
-	stravaClient *strava3golang.APIClient,
-	startTime time.Time,
-	endTime time.Time,
-	activityIdsToIgnore map[int64]struct{}) (
-	[]ActivityAndStream, error) {
+func GetActivitiesAndStreams(config *ActivitiesConfig) ([]ActivityAndStream, error) {
 
-	activities, err := RetrieveActivities(stravaClient, startTime, endTime)
+	activities, err := RetrieveActivities(config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error retrieving activities: %w", err)
 	}
 
 	slog.Info("retrieved activities",
@@ -151,7 +168,7 @@ func GetActivitiesAndStreams(
 
 	// filter out activities to be ignored
 	activities = slices.DeleteFunc(activities, func(a strava3golang.SummaryActivity) bool {
-		_, ok := activityIdsToIgnore[*a.Id]
+		_, ok := config.ActivityIdsToIgnore[*a.Id]
 		return ok
 	})
 
@@ -165,9 +182,9 @@ func GetActivitiesAndStreams(
 	for i, activity := range activities {
 		activityIds[i] = *activity.Id
 	}
-	streams, err := RetrieveStreams(stravaClient, activityIds)
+	streams, err := RetrieveStreams(config, activityIds)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error retrieving streams: %w", err)
 	}
 
 	slog.Info("retrieved streams",
