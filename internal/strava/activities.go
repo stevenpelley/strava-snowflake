@@ -14,14 +14,42 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const activitiesPageSize int32 = 30
+
 func RetrieveActivities(stravaClient *strava3golang.APIClient, start time.Time, end time.Time) (
 	[]strava3golang.SummaryActivity, error) {
 	startUnixTime := start.UTC().Unix()
 	endUnixTime := end.UTC().Unix()
-	activities, _, err :=
-		stravaClient.ActivitiesAPI.GetLoggedInAthleteActivities(
-			context.Background()).After(int32(startUnixTime)).Before(int32(endUnixTime)).Execute()
-	return activities, err
+	after := int32(startUnixTime)
+	before := int32(endUnixTime)
+
+	var currentPage int32 = 1
+	var itemsInPage int = 0
+	allActivities := make([]strava3golang.SummaryActivity, 0)
+	timeoutDuration, err := time.ParseDuration("30s")
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancelFunc := context.WithTimeout(context.Background(), timeoutDuration)
+	defer cancelFunc()
+
+	for currentPage == 1 || int32(itemsInPage) == activitiesPageSize {
+		activities, _, err := stravaClient.ActivitiesAPI.GetLoggedInAthleteActivities(
+			ctx).
+			After(after).
+			Before(before).
+			PerPage(activitiesPageSize).
+			Page(currentPage).
+			Execute()
+		if err != nil {
+			return nil, err
+		}
+		allActivities = append(allActivities, activities...)
+		itemsInPage = len(activities)
+		currentPage++
+	}
+
+	return allActivities, nil
 }
 
 func RetrieveStreams(stravaClient *strava3golang.APIClient, activityIds []int64) (

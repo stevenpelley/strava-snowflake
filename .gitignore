@@ -3,7 +3,7 @@
 /token.json
 /strava.log
 *.log
-*.log.swp
+*.swp
 /activities
 /activities.json
 duck.sql
