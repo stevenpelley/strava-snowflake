@@ -43,7 +43,7 @@ func RetrieveActivities(config *ActivitiesConfig) (
 	defer cancelFunc()
 
 	for currentPage == 1 || int32(itemsInPage) == activitiesPageSize {
-		slog.Debug("gettig activity page", "current_page", currentPage)
+		slog.Debug("getting activity page", "current_page", currentPage)
 		activities, _, err := config.StravaClient.ActivitiesAPI.GetLoggedInAthleteActivities(
 			ctx).
 			After(after).
@@ -62,6 +62,8 @@ func RetrieveActivities(config *ActivitiesConfig) (
 	return allActivities, nil
 }
 
+// retrieve the corresponding StreamSet for each activity in activityIds
+// note that when an error is returned the returned stream may be partially complete
 func RetrieveStreams(config *ActivitiesConfig, activityIds []int64) ([]*strava3golang.StreamSet, error) {
 	ctx, cancelFunc := context.WithTimeout(context.Background(), config.StreamsTimeoutDuration)
 	defer cancelFunc()
@@ -82,8 +84,11 @@ func RetrieveStreams(config *ActivitiesConfig, activityIds []int64) ([]*strava3g
 				// not yet cancelled, proceed without blocking
 			}
 
-			slog.Debug("sleeping prior to retrieving stream", "activity_id", activityId, "activity_index", i)
-			time.Sleep(config.PreStreamSleep)
+			if config.PreStreamSleep > 0 {
+				slog.Debug("sleeping prior to retrieving stream",
+					"activity_id", activityId, "activity_index", i)
+				time.Sleep(config.PreStreamSleep)
+			}
 			slog.Debug("retrieving stream", "activity_id", activityId, "activity_index", i)
 			streamSet, _, err := config.StravaClient.StreamsAPI.GetActivityStreams(ctx, activityId).
 				KeyByType(true).
@@ -153,6 +158,7 @@ type ActivityAndStream struct {
 	StreamSet *strava3golang.StreamSet
 }
 
+// note that this may return a partial result even when error is not nil
 func GetActivitiesAndStreams(config *ActivitiesConfig) ([]ActivityAndStream, error) {
 
 	activities, err := RetrieveActivities(config)
@@ -184,7 +190,9 @@ func GetActivitiesAndStreams(config *ActivitiesConfig) ([]ActivityAndStream, err
 	}
 	streams, err := RetrieveStreams(config, activityIds)
 	if err != nil {
-		return nil, fmt.Errorf("error retrieving streams: %w", err)
+		slog.Warn(
+			"error while retrieving streams.  Attempting to create partial result",
+			"error", err)
 	}
 
 	slog.Info("retrieved streams",
@@ -193,22 +201,32 @@ func GetActivitiesAndStreams(config *ActivitiesConfig) ([]ActivityAndStream, err
 			vals := make([]map[string]any, len(activities))
 			for i, s := range streams {
 				vals[i] = map[string]any{}
-				m, _ := s.ToMap()
-				for k, v := range m {
-					vMap := structs.Map(v)
-					delete(vMap, "Data")
-					vals[i][k] = vMap
+				if s != nil {
+					m, _ := s.ToMap()
+					for k, v := range m {
+						vMap := structs.Map(v)
+						delete(vMap, "Data")
+						vals[i][k] = vMap
+					}
 				}
 			}
 			return vals
 		}))
 
-	zipped := make([]ActivityAndStream, len(activities))
-	for i, a := range activities {
-		a := a
+	outputSize := slices.Index(streams, nil)
+	if outputSize < 0 {
+		outputSize = len(streams)
+	}
+	slog.Info("zipping result streams", "output size", outputSize, "untruncated activities size", len(streams))
+
+	zipped := make([]ActivityAndStream, outputSize)
+	for i := 0; i < outputSize; i++ {
+		i := i
+		a := activities[i]
 		streamSet := streams[i]
 		zipped[i] = ActivityAndStream{Activity: &a, StreamSet: streamSet}
 	}
 
-	return zipped, nil
+	// may have been a partial result so return previous error
+	return zipped, err
 }

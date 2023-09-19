@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -15,6 +17,7 @@ import (
 var activityIdsToIgnoreSlice = make([]int64, 0)
 var startDurationAgo time.Duration
 var endDurationAgo time.Duration
+var ignoreIdsFile string
 
 var config strava.ActivitiesConfig = strava.ActivitiesConfig{}
 
@@ -70,15 +73,52 @@ func initInputs() {
 		return nil
 	})
 
+	flag.StringVar(&ignoreIdsFile, "ignoreidsfile", "", "file containing newline delimited activity ids to ignore.  Recommend creating this file with jq .Activities.id from previous runs")
+
 	flag.Parse()
+
+	if startDurationAgo > 0 {
+		log.Panicf("startDurationAgo must be nonpositive (cannot be in the future): %v",
+			startDurationAgo)
+	}
+	if endDurationAgo > 0 {
+		log.Panicf("startDurationAgo must be nonpositive (cannot be in the future): %v",
+			endDurationAgo)
+	}
+	if startDurationAgo > endDurationAgo {
+		log.Panicf("startDurationAgo is more recent than endDurationAgo. start: %v. end: %v",
+			startDurationAgo, endDurationAgo)
+	}
 
 	t := time.Now()
 	config.StartTime = t.Add(startDurationAgo)
 	config.EndTime = t.Add(endDurationAgo)
 
-	for i, _ := range activityIdsToIgnoreSlice {
-		config.ActivityIdsToIgnore[int64(i)] = struct{}{}
+	if ignoreIdsFile != "" {
+		f, err := os.Open(ignoreIdsFile)
+		if err != nil {
+			log.Panicf("failed to open file %v: %v", ignoreIdsFile, err)
+		}
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			s := scanner.Text()
+			i, err := strconv.Atoi(s)
+			if err != nil {
+				log.Panicf("failed to convert line to int.  line: %v. error: %v", s, err)
+			}
+			activityIdsToIgnoreSlice = append(activityIdsToIgnoreSlice, int64(i))
+		}
+		if err = scanner.Err(); err != nil {
+			log.Panicf("error while scanning ignoreidsfile: %v", err)
+		}
 	}
+
+	config.ActivityIdsToIgnore = make(map[int64]struct{})
+	for _, i := range activityIdsToIgnoreSlice {
+		config.ActivityIdsToIgnore[i] = struct{}{}
+	}
+	slog.Debug("initialized inputs", "slice", activityIdsToIgnoreSlice, "config", config)
 }
 
 func main() {
@@ -88,12 +128,12 @@ func main() {
 	config.StravaClient = stravaClient
 
 	activities, err := strava.GetActivitiesAndStreams(&config)
-
+	// may have been a partial result so output the result before checking the error
+	for _, aas := range activities {
+		fmt.Fprintf(os.Stdout, "%v\n", util.MarshalOrPanic(aas))
+	}
 	if err != nil {
 		log.Panicf("error retrieving activities and streams: %v", err)
 	}
 
-	for _, aas := range activities {
-		fmt.Fprintf(os.Stdout, "%v\n", util.MarshalOrPanic(aas))
-	}
 }
