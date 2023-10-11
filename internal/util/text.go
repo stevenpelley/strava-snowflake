@@ -5,6 +5,10 @@ import (
 	"log"
 )
 
+type Jsonable interface {
+	ToJson() string
+}
+
 func MarshalOrPanic(a any) string {
 	b, err := json.Marshal(a)
 	if err != nil {

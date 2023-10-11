@@ -60,7 +60,6 @@ func InitLogging(logFile string) {
 	if logFile == "" {
 		// use stderr
 		writer = os.Stderr
-
 	} else {
 		// If the file doesn't exist, create it or append to the file
 		file, err := os.OpenFile(logFile,

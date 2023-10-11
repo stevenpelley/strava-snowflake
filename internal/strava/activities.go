@@ -14,6 +14,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type IntSet map[int64]struct{}
+
 type ActivitiesConfig struct {
 	StravaClient              *strava3golang.APIClient
 	StartTime                 time.Time
@@ -21,7 +23,7 @@ type ActivitiesConfig struct {
 	GetStreamsConcurrency     int
 	ActivitiesTimeoutDuration time.Duration
 	StreamsTimeoutDuration    time.Duration
-	ActivityIdsToIgnore       map[int64]struct{}
+	ActivityIdsToIgnore       IntSet
 	ActivitiesPerPage         int
 	PreStreamSleep            time.Duration
 }
@@ -158,8 +160,12 @@ type ActivityAndStream struct {
 	StreamSet *strava3golang.StreamSet
 }
 
+func (aas *ActivityAndStream) ToJson() string {
+	return util.MarshalOrPanic(aas)
+}
+
 // note that this may return a partial result even when error is not nil
-func GetActivitiesAndStreams(config *ActivitiesConfig) ([]ActivityAndStream, error) {
+func GetActivitiesAndStreams(config *ActivitiesConfig) ([]*ActivityAndStream, error) {
 
 	activities, err := RetrieveActivities(config)
 	if err != nil {
@@ -219,12 +225,12 @@ func GetActivitiesAndStreams(config *ActivitiesConfig) ([]ActivityAndStream, err
 	}
 	slog.Info("zipping result streams", "output size", outputSize, "untruncated activities size", len(streams))
 
-	zipped := make([]ActivityAndStream, outputSize)
+	zipped := make([]*ActivityAndStream, outputSize)
 	for i := 0; i < outputSize; i++ {
 		i := i
 		a := activities[i]
 		streamSet := streams[i]
-		zipped[i] = ActivityAndStream{Activity: &a, StreamSet: streamSet}
+		zipped[i] = &ActivityAndStream{Activity: &a, StreamSet: streamSet}
 	}
 
 	// may have been a partial result so return previous error

@@ -1,9 +1,12 @@
-/athlete
 /oauth_client_config.json
 /token.json
-/strava.log
-*.log
-*.swp
+/athlete
 /activities
 /activities.json
-duck.sql
+/activitiessql
+/test
+/*.sql
+/*.csv
+/*.duckdb*
+*.log
+*.swp
