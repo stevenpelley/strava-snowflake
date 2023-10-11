@@ -7,6 +7,6 @@
 /test
 /*.sql
 /*.csv
-/*.duckdb*
+*.duckdb*
 *.log
 *.swp

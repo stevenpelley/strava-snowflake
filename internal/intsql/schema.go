@@ -151,11 +151,14 @@ func CreateETLTable(db *sql.DB) error {
 	return row.Err()
 }
 
+// TODO: add primary key back once duckdb supports transaction updates to primary key (see indexes doc)
 func CreateActivitiesTable(db *sql.DB) error {
 	sqlText := fmt.Sprintf(`
 create or replace table %v
 (
-activity_id int64 primary key,
+activity_id int64
+--	primary key
+	,
 etl_id int64,
 activity ACTIVITY_T,
 streamset STREAMSET_NODATA_T,
@@ -165,6 +168,7 @@ streamset STREAMSET_NODATA_T,
 	return row.Err()
 }
 
+// TODO: add primary key back once duckdb supports transaction updates to primary key (see indexes doc)
 func CreateStreamsTable(db *sql.DB) error {
 	sqlText := fmt.Sprintf(`
 create or replace table %v
@@ -182,7 +186,7 @@ altitude double,
 latlong double[],
 temp int64,
 moving boolean,
-primary key (activity_id, time) -- compound primary key
+--primary key (activity_id, time) -- compound primary key
 );
 `, streamsTable)
 	row := db.QueryRow(sqlText)
@@ -223,9 +227,7 @@ select
 	try_cast(json_extract("json", '$.Activity') as ACTIVITY_T),
 	try_cast(json_extract("json", '$.StreamSet') as STREAMSET_NODATA_T)
 from deduped_etl
-where not exists (
-	select 1 from activities
-	where deduped_etl.activity_id = activities.activity_id and deduped_etl.etl_id <= activities.etl_id)
+where coalesce(etl_id > (select etl_id from activities where deduped_etl.activity_id = activities.activity_id), true)
 	;`,
 		newActivitiesView)
 	row := db.QueryRow(sqlText)
@@ -240,9 +242,7 @@ select
 	etl_id,
 	s.*
 from deduped_etl, expand_streams(try_cast(json_extract(deduped_etl."json", '$.StreamSet') as STREAMSET_T)) as s
-where not exists (
-	select 1 from streams
-	where deduped_etl.activity_id = streams.activity_id and deduped_etl.etl_id <= streams.etl_id)
+where coalesce(etl_id > (select etl_id from activities where deduped_etl.activity_id = activities.activity_id), true)
 	;`,
 		newStreamsView)
 	row := db.QueryRow(sqlText)

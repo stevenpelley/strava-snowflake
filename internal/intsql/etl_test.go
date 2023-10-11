@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -18,17 +18,33 @@ func (sj StringJsonable) ToJson() string {
 }
 
 func deleteTestFile(t *testing.T, testFile string) {
-	files, err := filepath.Glob(testFile + "*")
-	require.NoError(t, err)
-	for _, f := range files {
-		err := os.Remove(f)
-		require.NoError(t, err)
+	if testFile == "" {
+		return
+	}
+
+	err := os.Remove(testFile)
+	if err != nil {
+		require.ErrorIs(t, err, syscall.ENOENT)
+	}
+	err = os.Remove(testFile + ".wal")
+	if err != nil {
+		require.ErrorIs(t, err, syscall.ENOENT)
 	}
 }
 
-func DBTest(t *testing.T, testFile string, f func(db *sql.DB)) {
+type closeDb int64
+
+const (
+	Invalid closeDb = iota
+	Close
+	LeaveOpen
+)
+
+func DBTest(t *testing.T, testFile string, closeDb closeDb, f func(db *sql.DB)) {
 	deleteTestFile(t, testFile)
-	//defer deleteTestFile(testFile)
+	if closeDb == Close {
+		defer deleteTestFile(t, testFile)
+	}
 	db, err := OpenDB(testFile)
 	require.NoError(t, err)
 	defer db.Close()
@@ -37,9 +53,12 @@ func DBTest(t *testing.T, testFile string, f func(db *sql.DB)) {
 	f(db)
 }
 
+// scan the rows column-wise into the slices pointed to by ...any
+// The arguments of Scan are constructed according to the types of the pointed slices
 func ScanColumns(rows *sql.Rows, slicesOut ...any) error {
 	numCols := len(slicesOut)
-	sliceTypes := make([]reflect.Type, numCols)
+	slicePointerValues := make([]reflect.Value, numCols)
+	scanPointerValues := make([]reflect.Value, numCols)
 	scanArgs := make([]interface{}, numCols)
 
 	for i, s := range slicesOut {
@@ -52,11 +71,11 @@ func ScanColumns(rows *sql.Rows, slicesOut ...any) error {
 		if elem1.Kind() != reflect.Slice {
 			return fmt.Errorf("ScanColumns col %v not a slice pointer", i)
 		}
+		slicePointerValues[i] = reflect.ValueOf(s)
 
 		elem2 := elem1.Elem()
-		sliceTypes[i] = elem2
-		thisValue := reflect.New(elem2)
-		pointerValue := thisValue.Addr()
+		pointerValue := reflect.New(elem2)
+		scanPointerValues[i] = pointerValue
 		scanArgs[i] = pointerValue.Interface()
 	}
 
@@ -71,101 +90,147 @@ func ScanColumns(rows *sql.Rows, slicesOut ...any) error {
 		}
 
 		for i := 0; i < numCols; i++ {
-			// TODO keep going here.
-			// append the value to the slice.
+			pointerValue := scanPointerValues[i]
+			slicePointerValue := slicePointerValues[i]
+			newSliceValue := reflect.Append(slicePointerValue.Elem(), pointerValue.Elem())
+			reflect.Indirect(slicePointerValue).Set(newSliceValue)
 		}
 	}
 
 	return nil
-}
-
-type intoSliceScanner struct {
-	vals []interface{}
-}
-
-func (scanner *intoSliceScanner) Scan(src any) error {
-	var obj interface{}
-	switch v := src.(type) {
-	case []byte:
-		c := make([]byte, len(v))
-		copy(c, v)
-		obj = c
-	default:
-		obj = v
-	}
-	scanner.vals = append(scanner.vals, obj)
-	return nil
-}
-
-func ScanAll(t *testing.T, rows *sql.Rows) [][]interface{} {
-	columns, err := rows.Columns()
-	require.NoError(t, err)
-	numCols := len(columns)
-	scanners := make([]intoSliceScanner, numCols)
-	anys := make([]any, numCols)
-	for i := 0; i < numCols; i++ {
-		anys[i] = &scanners[i]
-	}
-
-	for rows.Next() {
-		err = rows.Scan(anys...)
-		require.NoError(t, err)
-		for i := 0; i < numCols; i++ {
-		}
-	}
-
-	results := make([][]interface{}, numCols)
-	for i := 0; i < numCols; i++ {
-		results[i] = scanners[i].vals
-	}
-	return results
 }
 
 func TestUploadActivityJson(t *testing.T) {
 	testFile := "testUploadActivityJson.duckdb"
 	require := require.New(t)
-	DBTest(t, testFile, func(db *sql.DB) {
+	DBTest(t, testFile, Close, func(db *sql.DB) {
 		s1 := `{"Activity":{"id":10}}`
 		s2 := `{"Activity":{"id":20}}`
 		// interface for comparison with generically scanned data
-		ss := []interface{}{s1, s2}
+		ss := []string{s1, s2}
 		require.NoError(UploadActivityJson(db, []StringJsonable{StringJsonable(s1), StringJsonable(s2)}))
 
 		rows, err := db.Query(`select * from temp_etl;`)
 		require.NoError(err)
 		defer rows.Close()
-		scanned := ScanAll(t, rows)
-		require.EqualValues(scanned[0], ss)
-		require.Equal(scanned[0], ss)
+		var scanned []string
+		err = ScanColumns(rows, &scanned)
+		require.NoError(err)
+		require.EqualValues(scanned, ss)
 
 		rows, err = db.Query(`select * from etl;`)
 		require.NoError(err)
 		defer rows.Close()
-		scanned = ScanAll(t, rows)
-		// interface for comparison with generically scanned data
-		expectedEtlIds := []interface{}{int64(1), int64(2)}
-		expectedActivityIds := []interface{}{int64(10), int64(20)}
-		require.EqualValues(scanned[0], expectedEtlIds)
-		require.EqualValues(scanned[1], expectedActivityIds)
-		require.EqualValues(scanned[2], ss)
+		var scanned0 []int64
+		var scanned1 []int64
+		var scanned2 []string
+		err = ScanColumns(rows, &scanned0, &scanned1, &scanned2)
+		require.NoError(err)
+
+		expectedEtlIds := []int64{int64(1), int64(2)}
+		expectedActivityIds := []int64{int64(10), int64(20)}
+		require.EqualValues(scanned0, expectedEtlIds)
+		require.EqualValues(scanned1, expectedActivityIds)
+		require.EqualValues(scanned2, ss)
 	})
 }
 
 func TestMergeActivities(t *testing.T) {
 	testFile := "testMergeActivities.duckdb"
-	DBTest(t, testFile, func(db *sql.DB) {
-		s1 := `{"Activity":{"id":10}}`
-		s2 := `{"Activity":{"id":20}}`
-		require.NoError(t, UploadActivityJson(db, []StringJsonable{StringJsonable(s1), StringJsonable(s2)}))
+	require := require.New(t)
 
-		//panicIfNotNil(MergeActivities(db))
+	DBTest(t, testFile, LeaveOpen, func(db *sql.DB) {
+		s1 := `{"Activity":{"id":10},"StreamSet":{"watts":{"resolution":"asdf","data":[0.0, 100.0, 150.0]},"time":{"data":[0, 1, 2]}}}`
+		s2 := `{"Activity":{"id":20},"StreamSet":{"watts":{"data":[200.0, 300.0, 150.0]},"time":{"data":[0, 1, 2]}}}`
+		require.NoError(UploadActivityJson(db, []StringJsonable{StringJsonable(s1), StringJsonable(s2)}))
+
+		require.NoError(MergeActivities(db))
+		rows, err := db.Query(`
+		select etl_id, activity_id, activity.id, streamset.watts.resolution
+		from activities
+		order by activity_id;`)
+		require.NoError(err)
+		defer rows.Close()
+
+		var etlIds []int64
+		var activityIds []int64
+		var activityIdsFromDoc []int64
+		var resolutions []sql.NullString
+		err = ScanColumns(rows, &etlIds, &activityIds, &activityIdsFromDoc, &resolutions)
+		require.NoError(err)
+
+		require.EqualValues([]int64{1, 2}, etlIds)
+		require.EqualValues([]int64{10, 20}, activityIds)
+		require.EqualValues([]int64{10, 20}, activityIdsFromDoc)
+		require.EqualValues([]sql.NullString{{String: "asdf", Valid: true}, {}}, resolutions)
+
+		// should be idempotent
+		require.NoError(MergeActivities(db))
+		rows, err = db.Query(`
+		select etl_id, activity_id, activity.id, streamset.watts.resolution
+		from activities
+		order by activity_id;`)
+		require.NoError(err)
+		defer rows.Close()
+
+		etlIds = etlIds[:0]
+		activityIds = activityIds[:0]
+		activityIdsFromDoc = activityIdsFromDoc[:0]
+		resolutions = resolutions[:0]
+		err = ScanColumns(rows, &etlIds, &activityIds, &activityIdsFromDoc, &resolutions)
+		require.NoError(err)
+
+		require.EqualValues([]int64{1, 2}, etlIds)
+		require.EqualValues([]int64{10, 20}, activityIds)
+		require.EqualValues([]int64{10, 20}, activityIdsFromDoc)
+		require.EqualValues([]sql.NullString{{String: "asdf", Valid: true}, {}}, resolutions)
+
+		// now insert additional activities, some new and some duplicates
+		s3 := `{"Activity":{"id":30},"StreamSet":{"watts":{"data":[500.0, 100.0, 150.0]},"time":{"data":[0, 1, 2]}}}`
+		require.NoError(UploadActivityJson(db, []StringJsonable{StringJsonable(s1), StringJsonable(s3)}))
+		require.NoError(MergeActivities(db))
+
+		rows, err = db.Query(`
+		select etl_id, activity_id, activity.id, streamset.watts.resolution
+		from activities
+		order by activity_id;`)
+		require.NoError(err)
+		defer rows.Close()
+
+		etlIds = etlIds[:0]
+		activityIds = activityIds[:0]
+		activityIdsFromDoc = activityIdsFromDoc[:0]
+		resolutions = resolutions[:0]
+		err = ScanColumns(rows, &etlIds, &activityIds, &activityIdsFromDoc, &resolutions)
+		require.NoError(err)
+		require.EqualValues([]int64{3, 2, 4}, etlIds)
+		require.EqualValues([]int64{10, 20, 30}, activityIds)
+		require.EqualValues([]int64{10, 20, 30}, activityIdsFromDoc)
+		require.EqualValues([]sql.NullString{{String: "asdf", Valid: true}, {}, {}}, resolutions)
+
+		// TODO validate streams
 	})
 }
 
 func TestScanColumns(t *testing.T) {
 	require := require.New(t)
-	DBTest(t, "", func(db *sql.DB) {
-		row := db.QueryRow("create table t(c int64);")
+	DBTest(t, "", Close, func(db *sql.DB) {
+		row := db.QueryRow("create table t(c1 int64, c2 string);")
 		require.NoError(row.Err())
+
+		row = db.QueryRow("insert into t values (1, 'asdf'), (2, 'qwer');")
+		require.NoError(row.Err())
+
+		rows, err := db.Query("select * from t;")
+		require.NoError(err)
+		defer rows.Close()
+
+		var ints []int64
+		var strings []string
+		err = ScanColumns(rows, &ints, &strings)
+		require.NoError(err)
+
+		require.EqualValues(ints, []int64{1, 2})
+		require.EqualValues(strings, []string{"asdf", "qwer"})
 	})
 }

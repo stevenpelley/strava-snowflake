@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"log/slog"
 
 	duckdb "github.com/marcboeker/go-duckdb"
 	"github.com/stevenpelley/strava-snowflake/internal/strava"
@@ -31,6 +32,7 @@ func GetExistingActivityIds(db *sql.DB) (strava.IntSet, error) {
 }
 
 func UploadActivityJson[T util.Jsonable](db *sql.DB, activities []T) error {
+	slog.Info("UploadActivityJson")
 	conn, err := db.Conn(context.TODO())
 	if err != nil {
 		return fmt.Errorf("error getting connection: %w", err)
@@ -87,6 +89,7 @@ func UploadActivityJson[T util.Jsonable](db *sql.DB, activities []T) error {
 }
 
 func MergeActivities(db *sql.DB) error {
+	slog.Info("MergeActivities")
 	txn, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("error starting transaction: %w", err)
@@ -100,33 +103,40 @@ func MergeActivities(db *sql.DB) error {
 	// NB: we use the activities and etl tables to determine duplicates.  We must delete rows
 	// from streams before activities as once we delete from activities we will no longer deem
 	// the activity_ids as duplicates
-	row := txn.QueryRowContext(context.TODO(), `
+	sqlText := `
 		delete from streams
 		where activity_id in (
-			select activity_id from activity_ids_to_update);`)
+			select activity_id from activity_ids_to_update);`
+	row := QueryRowContext(context.TODO(), txn, "delete duplicate streams", sqlText)
 	if row.Err() != nil {
 		return fmt.Errorf("removing duplicate activities from streams: %w", row.Err())
 	}
+	LogRowResponse(row, "delete duplicate streams")
 
-	row = txn.QueryRowContext(context.TODO(), `
-		delete from activities
+	sqlText = `delete from activities
 		where activity_id in (
-			select activity_id from activity_ids_to_update);`)
+			select activity_id from activity_ids_to_update);`
+	row = QueryRowContext(context.TODO(), txn, "delete duplicate activities", sqlText)
 	if row.Err() != nil {
 		return fmt.Errorf("removing duplicate activities from activities: %w", row.Err())
 	}
+	LogRowResponse(row, "delete duplicate activities")
 
 	// insert rows, both new and as semantic updates.
-	row = txn.QueryRowContext(context.TODO(), `insert into activities select * from new_activties;`)
+	sqlText = `insert into activities select * from new_activities;`
+	row = QueryRowContext(context.TODO(), txn, "insert new activities", sqlText)
 	if row.Err() != nil {
 		return fmt.Errorf("inserting new activities: %w", row.Err())
 	}
+	LogRowResponse(row, "insert new activities")
 
 	// insert the new rows into streams
-	row = txn.QueryRowContext(context.TODO(), `insert into streams select * from new_streams;`)
+	sqlText = `insert into streams select * from new_streams;`
+	row = QueryRowContext(context.TODO(), txn, "insert new streams", sqlText)
 	if row.Err() != nil {
-		return fmt.Errorf("inserting new activities: %w", row.Err())
+		return fmt.Errorf("inserting new streams: %w", row.Err())
 	}
+	LogRowResponse(row, "insert new streams")
 
 	err = txn.Commit()
 	if err != nil {
