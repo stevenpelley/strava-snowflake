@@ -13,10 +13,10 @@ import (
 )
 
 func GetExistingActivityIds(db *sql.DB) (strava.IntSet, error) {
-	sqlText := fmt.Sprintf(`select activity_id from %v;`, activitiesTable)
+	sqlText := `select activity_id from activities;`
 	rows, err := db.Query(sqlText)
 	if err != nil {
-		return nil, fmt.Errorf("error querying for existing activity ids: %w", err)
+		return nil, fmt.Errorf("querying for existing activity ids: %w", err)
 	}
 
 	set := strava.IntSet{}
@@ -24,7 +24,7 @@ func GetExistingActivityIds(db *sql.DB) (strava.IntSet, error) {
 	for rows.Next() {
 		err = rows.Scan(&i)
 		if err != nil {
-			return nil, fmt.Errorf("error scanning existing activity ids: %w", err)
+			return nil, fmt.Errorf("scanning existing activity ids: %w", err)
 		}
 		set[i] = struct{}{}
 	}
@@ -33,66 +33,70 @@ func GetExistingActivityIds(db *sql.DB) (strava.IntSet, error) {
 
 func UploadActivityJson[T util.Jsonable](db *sql.DB, activities []T) error {
 	slog.Info("UploadActivityJson")
+
+	// we use a conn as this is required for Raw.  In the future I want temp_etl to be a temp table (currently
+	// temp tables cannot have extension types such as json, a bug) so it must also be handled with the conn
 	conn, err := db.Conn(context.TODO())
 	if err != nil {
-		return fmt.Errorf("error getting connection: %w", err)
+		return fmt.Errorf("getting connection: %w", err)
 	}
 	defer conn.Close()
 
-	rows, err := conn.QueryContext(
-		context.TODO(),
-		fmt.Sprintf("delete from \"%v\";", tempEtlTable))
-	if err != nil {
-		return fmt.Errorf("error clearing temp etl table: %w", err)
+	row := QueryRowContext(context.TODO(), conn, "clear temp etl", `delete from "temp_etl";`)
+	if row.Err() != nil {
+		return fmt.Errorf("clear temp etl: %w", row.Err())
 	}
-	defer rows.Close()
+	LogRowResponse(row, "clear temp etl")
 
+	slog.Info("appending into temp_etl")
 	err = conn.Raw(func(a any) error {
 		dbConn, ok := a.(driver.Conn)
 		if !ok {
 			return fmt.Errorf("not a duckdb driver connection")
 		}
 
-		appender, err := duckdb.NewAppenderFromConn(dbConn, "", tempEtlTable)
+		appender, err := duckdb.NewAppenderFromConn(dbConn, "", "temp_etl")
 		if err != nil {
-			return fmt.Errorf("error creating appender for json etl: %w", err)
+			return fmt.Errorf("creating appender for json etl: %w", err)
 		}
 		defer appender.Close()
 
 		for _, activity := range activities {
 			err = appender.AppendRow(activity.ToJson())
 			if err != nil {
-				return fmt.Errorf("error appending row: %w", err)
+				return fmt.Errorf("appending row: %w", err)
 			}
 		}
 
 		err = appender.Flush()
 		if err != nil {
-			return fmt.Errorf("error flushing appender: %w", err)
+			return fmt.Errorf("flushing appender: %w", err)
 		}
 
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("error running conn.raw for appender: %w", err)
+		return fmt.Errorf("conn.raw for appender: %w", err)
 	}
+	slog.Info("appended into temp_etl", "rows", len(activities))
 
-	_, err = conn.ExecContext(
-		context.TODO(),
-		fmt.Sprintf("insert into \"%v\" (activity_id, json) select (\"json\"->'$.Activity.id')::int64, json(\"json\") from \"%v\";",
-			etlTable, tempEtlTable))
-	if err != nil {
-		return fmt.Errorf("error copying from temp_etl to etl: %w", err)
+	sqlText := `insert into "etl" (activity_id, json)
+		select ("json"->'$.Activity.id')::int64, json("json")
+		from "temp_etl";`
+	row = QueryRowContext(context.TODO(), conn, "insert into etl", sqlText)
+	if row.Err() != nil {
+		return fmt.Errorf("insert into etl: %w", row.Err())
 	}
+	LogRowResponse(row, "insert into etl")
 
 	return nil
 }
 
-func MergeActivities(db *sql.DB) error {
+func MergeActivities(db *sql.DB, streamsLimit int64) error {
 	slog.Info("MergeActivities")
 	txn, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("error starting transaction: %w", err)
+		return fmt.Errorf("starting transaction: %w", err)
 	}
 	defer txn.Rollback()
 
@@ -131,16 +135,28 @@ func MergeActivities(db *sql.DB) error {
 	LogRowResponse(row, "insert new activities")
 
 	// insert the new rows into streams
-	sqlText = `insert into streams select * from new_streams;`
-	row = QueryRowContext(context.TODO(), txn, "insert new streams", sqlText)
-	if row.Err() != nil {
-		return fmt.Errorf("inserting new streams: %w", row.Err())
+	slog.Info("inserting into streams in batches", "limit", streamsLimit)
+	sqlText = fmt.Sprintf(`insert into streams select * from new_streams limit %v;`, streamsLimit)
+	keepGoing := true
+	for keepGoing {
+		row = QueryRowContext(context.TODO(), txn, "insert new streams", sqlText)
+		if row.Err() != nil {
+			return fmt.Errorf("inserting new streams: %w", row.Err())
+		}
+		var i int64
+		err := row.Scan(&i)
+		if err != nil {
+			return fmt.Errorf("insert new streams on scan: %w", err)
+		}
+		slog.Info("inserted new streams",
+			"tag", []string{"sql", "response"},
+			"response", i)
+		keepGoing = i > 0
 	}
-	LogRowResponse(row, "insert new streams")
 
 	err = txn.Commit()
 	if err != nil {
-		return fmt.Errorf("error committing: %w", err)
+		return fmt.Errorf("committing: %w", err)
 	}
 
 	return nil

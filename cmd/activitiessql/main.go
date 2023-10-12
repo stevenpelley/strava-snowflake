@@ -41,7 +41,10 @@ func main() {
 		config.ActivityIdsToIgnore[activityId] = struct{}{}
 	}
 
-	stravaClient := strava.CreateStravaClient()
+	stravaClient, err := strava.CreateStravaClient(&stravaFlags)
+	if err != nil {
+		log.Panicf("error creating strava client: %v", err)
+	}
 	config.StravaClient = stravaClient
 
 	// recall that this may return a partial result alongside an error
@@ -52,7 +55,7 @@ func main() {
 		log.Panicf("error loading json: %v", err)
 	}
 
-	err = intsql.MergeActivities(db)
+	err = intsql.MergeActivities(db, duckdbFlags.StreamsEtlLimit)
 	if err != nil {
 		log.Panicf("error merging activities: %v", err)
 	}

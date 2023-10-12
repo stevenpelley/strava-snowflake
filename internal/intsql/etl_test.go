@@ -152,7 +152,7 @@ func mergeActivitiesAndAssertEffects(
 	db *sql.DB,
 	expectedMergeEffects expectedMergeEffects) {
 	require := require.New(t)
-	require.NoError(MergeActivities(db))
+	require.NoError(MergeActivities(db, 1))
 
 	// assert activities
 	rows, err := db.Query(`

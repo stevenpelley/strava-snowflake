@@ -10,3 +10,4 @@
 *.duckdb*
 *.log
 *.swp
+/.tmp

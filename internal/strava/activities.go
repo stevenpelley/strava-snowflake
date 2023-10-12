@@ -54,7 +54,7 @@ func RetrieveActivities(config *ActivitiesConfig) (
 			Page(currentPage).
 			Execute()
 		if err != nil {
-			return nil, fmt.Errorf("error retrieving activity page: %w", err)
+			return nil, fmt.Errorf("retrieving activity page: %w", err)
 		}
 		allActivities = append(allActivities, activities...)
 		itemsInPage = len(activities)
@@ -99,7 +99,7 @@ func RetrieveStreams(config *ActivitiesConfig, activityIds []int64) ([]*strava3g
 			if err != nil {
 				slog.Warn("error retrieving stream", "activity_id", activityId, "activity_index", i, "error", err)
 				return fmt.Errorf(
-					"error retrieving activity stream. id: %v. activity index: %v. error: %w",
+					"retrieving activity stream. id: %v. activity index: %v. error: %w",
 					activityId, i, err)
 			}
 			slog.Debug("retrieved stream successfully", "activity_id", activityId, "activity_index", i)
@@ -166,10 +166,9 @@ func (aas *ActivityAndStream) ToJson() string {
 
 // note that this may return a partial result even when error is not nil
 func GetActivitiesAndStreams(config *ActivitiesConfig) ([]*ActivityAndStream, error) {
-
 	activities, err := RetrieveActivities(config)
 	if err != nil {
-		return nil, fmt.Errorf("error retrieving activities: %w", err)
+		return nil, fmt.Errorf("retrieving activities: %w", err)
 	}
 
 	slog.Info("retrieved activities",
@@ -197,7 +196,7 @@ func GetActivitiesAndStreams(config *ActivitiesConfig) ([]*ActivityAndStream, er
 	streams, err := RetrieveStreams(config, activityIds)
 	if err != nil {
 		slog.Warn(
-			"error while retrieving streams.  Attempting to create partial result",
+			"error retrieving streams.  Attempting to create partial result",
 			"error", err)
 	}
 
@@ -219,19 +218,16 @@ func GetActivitiesAndStreams(config *ActivitiesConfig) ([]*ActivityAndStream, er
 			return vals
 		}))
 
-	outputSize := slices.Index(streams, nil)
-	if outputSize < 0 {
-		outputSize = len(streams)
+	slog.Info("zipping result streams", "untruncated activities size", len(streams))
+	zipped := make([]*ActivityAndStream, 0, len(activities))
+	for i := 0; i < len(activities); i++ {
+		activity := activities[i]
+		stream := streams[i]
+		if stream != nil {
+			zipped = append(zipped, &ActivityAndStream{Activity: &activity, StreamSet: stream})
+		}
 	}
-	slog.Info("zipping result streams", "output size", outputSize, "untruncated activities size", len(streams))
-
-	zipped := make([]*ActivityAndStream, outputSize)
-	for i := 0; i < outputSize; i++ {
-		i := i
-		a := activities[i]
-		streamSet := streams[i]
-		zipped[i] = &ActivityAndStream{Activity: &a, StreamSet: streamSet}
-	}
+	slog.Info("zipped result streams", "truncated activities size", len(zipped))
 
 	// may have been a partial result so return previous error
 	return zipped, err

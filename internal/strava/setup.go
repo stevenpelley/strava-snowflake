@@ -3,6 +3,8 @@ package strava
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"log/slog"
@@ -12,47 +14,56 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// load the file, expected to be json-encoded data.  Unmarshal into object pointed to by destination
+func readAndUnmarshalConfigFile(fileName string, destination any) error {
+	if fileName == "" {
+		return errors.New("readAndUnmarshalConfigFile requires non empty oauth config file name")
+	}
+	var err error
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		return fmt.Errorf("reading config. file: %v: %w", fileName, err)
+	}
+	err = json.Unmarshal(data, destination)
+	if err != nil {
+		return fmt.Errorf("parsing config. file: %v: %w", fileName, err)
+	}
+	return nil
+}
+
 // Create the oauth config used for all oauth requests
-func CreateOauthConfig() *oauth2.Config {
-	var err error
-	data, err := os.ReadFile("oauth_client_config.json")
-	if err != nil {
-		log.Panicf("error reading the oauth client config: %v", err)
-	}
-
+func CreateOauthConfig(oauthConfigFile string) (*oauth2.Config, error) {
 	var clientConfig oauth2.Config
-	err = json.Unmarshal(data, &clientConfig)
+	err := readAndUnmarshalConfigFile(oauthConfigFile, &clientConfig)
 	if err != nil {
-		log.Panicf("panic while parsing oauth config: %v", err)
+		return nil, fmt.Errorf("CreateOauthConfig: %w", err)
 	}
-
-	return &clientConfig
+	return &clientConfig, nil
 }
 
-func CreateToken() *oauth2.Token {
-	var err error
-	data, err := os.ReadFile("token.json")
-	if err != nil {
-		log.Panicf("error reading the token: %v", err)
-	}
-
+func CreateToken(tokenFile string) (*oauth2.Token, error) {
 	var token oauth2.Token
-	err = json.Unmarshal(data, &token)
+	err := readAndUnmarshalConfigFile(tokenFile, &token)
 	if err != nil {
-		log.Panicf("error parsing the token: %v", err)
+		return nil, fmt.Errorf("CreateToken: %w", err)
 	}
-
-	return &token
+	return &token, nil
 }
 
-func CreateStravaClient() *strava3golang.APIClient {
-	conf := CreateOauthConfig()
-	token := CreateToken()
+func CreateStravaClient(sf *StravaFlags) (*strava3golang.APIClient, error) {
+	conf, err := CreateOauthConfig(sf.OauthConfigFile)
+	if err != nil {
+		return nil, fmt.Errorf("CreateStravaClient: %w", err)
+	}
+	token, err := CreateToken(sf.OauthTokenFile)
+	if err != nil {
+		return nil, fmt.Errorf("CreateStravaClient: %w", err)
+	}
 
 	client := conf.Client(context.Background(), token)
 	stravaApiConfig := strava3golang.NewConfiguration()
 	stravaApiConfig.HTTPClient = client
-	return strava3golang.NewAPIClient(stravaApiConfig)
+	return strava3golang.NewAPIClient(stravaApiConfig), nil
 }
 
 func InitLogging(logFile string) {

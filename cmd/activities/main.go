@@ -18,7 +18,10 @@ func main() {
 	flag.Parse()
 	stravaFlags.PostProcessFlags()
 
-	stravaClient := strava.CreateStravaClient()
+	stravaClient, err := strava.CreateStravaClient(&stravaFlags)
+	if err != nil {
+		log.Panicf("error creating strava client: %v", err)
+	}
 	stravaFlags.Config.StravaClient = stravaClient
 
 	activities, err := strava.GetActivitiesAndStreams(&stravaFlags.Config)

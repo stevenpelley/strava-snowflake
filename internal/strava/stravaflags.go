@@ -16,6 +16,8 @@ type StravaFlags struct {
 	endDurationAgo           time.Duration
 	ignoreIdsFile            string
 	Config                   ActivitiesConfig
+	OauthConfigFile          string
+	OauthTokenFile           string
 }
 
 // must be called before flag.Parse().  Panics on any error
@@ -61,6 +63,12 @@ func (sf *StravaFlags) InitFlags() {
 
 	flag.DurationVar(&sf.Config.PreStreamSleep, "prestreamsleep", 0,
 		"duration to sleep prior to retrieving each stream to act as throttling")
+
+	flag.StringVar(&sf.OauthConfigFile, "oauthconfigfile", "oauth_client_config.json",
+		"file containing json-encoded oauth2.Config for strava")
+
+	flag.StringVar(&sf.OauthTokenFile, "oauthtokenfile", "token.json",
+		"file containing json-encoded token for strava")
 
 	flag.Func("ignoreid", "ignore activity id (may be used multiple times)", func(s string) error {
 		i, err := strconv.Atoi(s)

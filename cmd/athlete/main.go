@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"log/slog"
 
@@ -10,7 +11,15 @@ import (
 
 func main() {
 	strava.InitLogging("athlete.log")
-	stravaClient := strava.CreateStravaClient()
+	// most of these are ignored but this is just a simple demo
+	stravaFlags := strava.StravaFlags{}
+	stravaFlags.InitFlags()
+	flag.Parse()
+	stravaFlags.PostProcessFlags()
+	stravaClient, err := strava.CreateStravaClient(&stravaFlags)
+	if err != nil {
+		log.Panicf("error creating strava client: %v", err)
+	}
 	detailedAthlete, _, err :=
 		stravaClient.AthletesAPI.GetLoggedInAthlete(context.Background()).Execute()
 	if err != nil {
