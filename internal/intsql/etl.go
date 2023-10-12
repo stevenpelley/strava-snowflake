@@ -93,12 +93,18 @@ func UploadActivityJson[T util.Jsonable](db *sql.DB, activities []T) error {
 }
 
 func MergeActivities(db *sql.DB, streamsLimit int64) error {
+	// TODO
+	// reintroduce the transaction
+	// remove the limit for new streams
+
 	slog.Info("MergeActivities")
-	txn, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("starting transaction: %w", err)
-	}
-	defer txn.Rollback()
+	//txn, err := db.Begin()
+	//if err != nil {
+	//	return fmt.Errorf("starting transaction: %w", err)
+	//}
+	//defer txn.Rollback()
+	//var dbCtx QueryRowContextable = txn
+	var dbCtx QueryRowContextable = db
 
 	// insert on conflict (merge) is not supported in duckdb for anything including a list type,
 	// which appears to include lists nested in structs.  So we will transactionally delete all
@@ -111,7 +117,7 @@ func MergeActivities(db *sql.DB, streamsLimit int64) error {
 		delete from streams
 		where activity_id in (
 			select activity_id from activity_ids_to_update);`
-	row := QueryRowContext(context.TODO(), txn, "delete duplicate streams", sqlText)
+	row := QueryRowContext(context.TODO(), dbCtx, "delete duplicate streams", sqlText)
 	if row.Err() != nil {
 		return fmt.Errorf("removing duplicate activities from streams: %w", row.Err())
 	}
@@ -120,7 +126,7 @@ func MergeActivities(db *sql.DB, streamsLimit int64) error {
 	sqlText = `delete from activities
 		where activity_id in (
 			select activity_id from activity_ids_to_update);`
-	row = QueryRowContext(context.TODO(), txn, "delete duplicate activities", sqlText)
+	row = QueryRowContext(context.TODO(), dbCtx, "delete duplicate activities", sqlText)
 	if row.Err() != nil {
 		return fmt.Errorf("removing duplicate activities from activities: %w", row.Err())
 	}
@@ -128,7 +134,7 @@ func MergeActivities(db *sql.DB, streamsLimit int64) error {
 
 	// insert rows, both new and as semantic updates.
 	sqlText = `insert into activities select * from new_activities;`
-	row = QueryRowContext(context.TODO(), txn, "insert new activities", sqlText)
+	row = QueryRowContext(context.TODO(), dbCtx, "insert new activities", sqlText)
 	if row.Err() != nil {
 		return fmt.Errorf("inserting new activities: %w", row.Err())
 	}
@@ -136,10 +142,10 @@ func MergeActivities(db *sql.DB, streamsLimit int64) error {
 
 	// insert the new rows into streams
 	slog.Info("inserting into streams in batches", "limit", streamsLimit)
-	sqlText = fmt.Sprintf(`insert into streams select * from new_streams limit %v;`, streamsLimit)
+	sqlText = fmt.Sprintf(`insert into streams select * from new_streams_with_limit(%v);`, streamsLimit)
 	keepGoing := true
 	for keepGoing {
-		row = QueryRowContext(context.TODO(), txn, "insert new streams", sqlText)
+		row = QueryRowContext(context.TODO(), dbCtx, "insert new streams", sqlText)
 		if row.Err() != nil {
 			return fmt.Errorf("inserting new streams: %w", row.Err())
 		}
@@ -154,10 +160,10 @@ func MergeActivities(db *sql.DB, streamsLimit int64) error {
 		keepGoing = i > 0
 	}
 
-	err = txn.Commit()
-	if err != nil {
-		return fmt.Errorf("committing: %w", err)
-	}
+	////err = txn.Commit()
+	////if err != nil {
+	////	return fmt.Errorf("committing: %w", err)
+	////}
 
 	return nil
 }

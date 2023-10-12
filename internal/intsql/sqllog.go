@@ -12,8 +12,11 @@ type QueryRowContextable interface {
 }
 
 func QueryRowContext(context context.Context, q QueryRowContextable, logLabel string, sqlText string, args ...any) *sql.Row {
+	slog.Info(logLabel, "sql_text", sqlText, "tag", []string{"sql", "query", "row"})
 	row := q.QueryRowContext(context, sqlText, args...)
-	slog.Info(logLabel, "sql_text", sqlText, "tag", []string{"sql", "query", "row"}, "err", row.Err())
+	if row.Err() != nil {
+		slog.Info(logLabel, "sql_text", sqlText, "tag", []string{"sql", "error", "row"}, "error", row.Err())
+	}
 	return row
 }
 
@@ -34,7 +37,10 @@ type QueryContextable interface {
 }
 
 func QueryContext(context context.Context, q QueryContextable, logLabel string, sqlText string) (*sql.Rows, error) {
+	slog.Info(logLabel, "sql_text", sqlText, "tag", []string{"sql", "query", "rows"})
 	rows, err := q.QueryContext(context, sqlText)
-	slog.Info(logLabel, "sql_text", sqlText, "tag", []string{"sql", "query", "rows"}, "err", err)
+	if err != nil {
+		slog.Info(logLabel, "sql_text", sqlText, "tag", []string{"sql", "error", "rows"}, "error", err)
+	}
 	return rows, err
 }

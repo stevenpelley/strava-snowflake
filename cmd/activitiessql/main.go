@@ -16,6 +16,9 @@ func main() {
 	duckdbFlags := intsql.DuckdbFlags{}
 	duckdbFlags.InitFlags()
 
+	var mergeOnly bool
+	flag.BoolVar(&mergeOnly, "mergeonly", false, "if true perform merge from existing data.  Do not retrieve.")
+
 	flag.Parse()
 
 	stravaFlags.PostProcessFlags()
@@ -28,31 +31,36 @@ func main() {
 	}
 	defer db.Close()
 
-	err = intsql.InitAndValidateSchema(db)
-	if err != nil {
-		log.Panicf("error initializing data schema: %v", err)
-	}
+	var getActivitiesErr error
+	if !mergeOnly {
+		err = intsql.InitAndValidateSchema(db)
+		if err != nil {
+			log.Panicf("error initializing data schema: %v", err)
+		}
 
-	activityIdsToIgnore, err := intsql.GetExistingActivityIds(db)
-	if err != nil {
-		log.Panicf("error loading existing activity ids: %v", err)
-	}
-	for activityId, _ := range activityIdsToIgnore {
-		config.ActivityIdsToIgnore[activityId] = struct{}{}
-	}
+		activityIdsToIgnore, err := intsql.GetExistingActivityIds(db)
+		if err != nil {
+			log.Panicf("error loading existing activity ids: %v", err)
+		}
+		for activityId, _ := range activityIdsToIgnore {
+			config.ActivityIdsToIgnore[activityId] = struct{}{}
+		}
 
-	stravaClient, err := strava.CreateStravaClient(&stravaFlags)
-	if err != nil {
-		log.Panicf("error creating strava client: %v", err)
-	}
-	config.StravaClient = stravaClient
+		stravaClient, err := strava.CreateStravaClient(&stravaFlags)
+		if err != nil {
+			log.Panicf("error creating strava client: %v", err)
+		}
+		config.StravaClient = stravaClient
 
-	// recall that this may return a partial result alongside an error
-	activities, getActivitiesErr := strava.GetActivitiesAndStreams(config)
+		// recall that this may return a partial result alongside an error
 
-	err = intsql.UploadActivityJson(db, activities)
-	if err != nil {
-		log.Panicf("error loading json: %v", err)
+		var activities []*strava.ActivityAndStream
+		activities, getActivitiesErr = strava.GetActivitiesAndStreams(config)
+
+		err = intsql.UploadActivityJson(db, activities)
+		if err != nil {
+			log.Panicf("error loading json: %v", err)
+		}
 	}
 
 	err = intsql.MergeActivities(db, duckdbFlags.StreamsEtlLimit)

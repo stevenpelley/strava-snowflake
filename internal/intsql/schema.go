@@ -59,7 +59,7 @@ func ValidateSchema(db *sql.DB) error {
 		return err
 	}
 	defer rows.Close()
-	results = make([]string, 0, 1)
+	results = make([]string, 0, 2)
 	for rows.Next() {
 		var s string
 		err = rows.Scan(&s)
@@ -70,7 +70,7 @@ func ValidateSchema(db *sql.DB) error {
 	}
 	rows.Close()
 
-	expected = []string{"expand_streams"}
+	expected = []string{"expand_streams", "new_streams_with_limit"}
 	if !reflect.DeepEqual(expected, results) {
 		return fmt.Errorf(
 			"unexpected existing macros.  Expected %v.  Found: %v",
@@ -122,9 +122,9 @@ func InitSchema(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("create new_activities: %w", err)
 	}
-	err = CreateNewStreamsView(db)
+	err = CreateMacros(db)
 	if err != nil {
-		return fmt.Errorf("create new_streams: %w", err)
+		return fmt.Errorf("create macros: %w", err)
 	}
 	return nil
 }
@@ -151,7 +151,7 @@ func CreateETLTable(db *sql.DB) error {
 // TODO: add primary key back once duckdb supports transaction updates to primary key (see indexes doc)
 func CreateActivitiesTable(db *sql.DB) error {
 	sqlText := `
-create or replace table activities
+create table if not exists activities
 (
 activity_id int64
 --	primary key
@@ -167,7 +167,7 @@ streamset STREAMSET_NODATA_T,
 // TODO: add primary key back once duckdb supports transaction updates to primary key (see indexes doc)
 func CreateStreamsTable(db *sql.DB) error {
 	sqlText := `
-create or replace table streams
+create table if not exists streams
 (
 activity_id int64,
 etl_id int64,
@@ -191,7 +191,7 @@ moving boolean,
 
 func CreateActivityIdsToUpdateView(db *sql.DB) error {
 	sqlText := `
-create or replace view activity_ids_to_update as
+create view if not exists activity_ids_to_update as
 select activity_id
 from activities
 where exists (
@@ -205,7 +205,7 @@ where exists (
 
 func CreateDedupedEtlView(db *sql.DB) error {
 	sqlText := `
-create or replace view deduped_etl as
+create view if not exists deduped_etl as
 select *
 from etl
 where etl_id = (select max(etl_id) from etl as etl2 where etl.activity_id = etl2.activity_id);`
@@ -215,7 +215,7 @@ where etl_id = (select max(etl_id) from etl as etl2 where etl.activity_id = etl2
 
 func CreateNewActivitiesView(db *sql.DB) error {
 	sqlText := `
-create or replace view new_activities as
+create view if not exists new_activities as
 select 
 	activity_id,
 	etl_id,
@@ -223,20 +223,6 @@ select
 	try_cast(json_extract("json", '$.StreamSet') as STREAMSET_NODATA_T)
 from deduped_etl
 where coalesce(etl_id > (select max(etl_id) from activities where deduped_etl.activity_id = activities.activity_id), true)
-	;`
-	row := db.QueryRow(sqlText)
-	return row.Err()
-}
-
-func CreateNewStreamsView(db *sql.DB) error {
-	sqlText := `
-create or replace view new_streams as
-select 
-	activity_id,
-	etl_id,
-	s.*
-from deduped_etl, expand_streams(try_cast(json_extract(deduped_etl."json", '$.StreamSet') as STREAMSET_T)) as s
-where coalesce(etl_id > (select max(etl_id) from streams where s.time = streams.time and deduped_etl.activity_id = streams.activity_id), true)
 	;`
 	row := db.QueryRow(sqlText)
 	return row.Err()
@@ -261,7 +247,7 @@ func CreateTypes(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	err = createOrReplaceType(db, "STREASET_T", `create type STREAMSET_T as struct(altitude struct("data" double[], original_size bigint, resolution varchar, series_type varchar), cadence struct("data" bigint[], original_size bigint, resolution varchar, series_type varchar), distance struct("data" double[], original_size bigint, resolution varchar, series_type varchar), grade_smooth struct("data" double[], original_size bigint, resolution varchar, series_type varchar), heartrate struct("data" bigint[], original_size bigint, resolution varchar, series_type varchar), latlng struct("data" double[][], original_size bigint, resolution varchar, series_type varchar), moving struct("data" boolean[], original_size bigint, resolution varchar, series_type varchar), "time" struct("data" bigint[], original_size bigint, resolution varchar, series_type varchar), velocity_smooth struct("data" double[], original_size bigint, resolution varchar, series_type varchar), watts struct("data" bigint[], original_size bigint, resolution varchar, series_type varchar), "temp" struct("data" bigint[], original_size bigint, resolution varchar, series_type varchar));`)
+	err = createOrReplaceType(db, "STREAMSET_T", `create type STREAMSET_T as struct(altitude struct("data" double[], original_size bigint, resolution varchar, series_type varchar), cadence struct("data" bigint[], original_size bigint, resolution varchar, series_type varchar), distance struct("data" double[], original_size bigint, resolution varchar, series_type varchar), grade_smooth struct("data" double[], original_size bigint, resolution varchar, series_type varchar), heartrate struct("data" bigint[], original_size bigint, resolution varchar, series_type varchar), latlng struct("data" double[][], original_size bigint, resolution varchar, series_type varchar), moving struct("data" boolean[], original_size bigint, resolution varchar, series_type varchar), "time" struct("data" bigint[], original_size bigint, resolution varchar, series_type varchar), velocity_smooth struct("data" double[], original_size bigint, resolution varchar, series_type varchar), watts struct("data" bigint[], original_size bigint, resolution varchar, series_type varchar), "temp" struct("data" bigint[], original_size bigint, resolution varchar, series_type varchar));`)
 	if err != nil {
 		return err
 	}
@@ -272,8 +258,31 @@ func CreateTypes(db *sql.DB) error {
 	return nil
 }
 
-func CreateMacros(db *sql.DB) error {
-	sqlText := `create or replace macro expand_streams(c) as table
+func CreateNewStreamsMacro(db *sql.DB) error {
+	sqlText := `
+create macro if not exists new_streams_with_limit(n) as table
+select e.activity_id, e.etl_id, expanded.* from
+	(
+		select
+			*,
+			try_cast(json_extract(d."json", '$.StreamSet') as STREAMSET_T) as ss
+		from deduped_etl as d
+		where coalesce(
+			d.etl_id > (
+				select max(etl_id)
+				from streams
+				where d.activity_id = streams.activity_id),
+			true)
+		limit n
+	) as e,
+	expand_streams(e.ss) expanded
+	;`
+	row := db.QueryRow(sqlText)
+	return row.Err()
+}
+
+func CreateExpandStreamsMacro(db *sql.DB) error {
+	sqlText := `create macro if not exists expand_streams(c) as table
 		select
 		  unnest(c['time']['data']) as time,
 		  unnest(c['watts']['data']) as watts,
@@ -288,8 +297,20 @@ func CreateMacros(db *sql.DB) error {
 		  unnest(c['moving']['data']) as moving,
 		;`
 	row := db.QueryRow(sqlText)
-	if row.Err() != nil {
-		return fmt.Errorf("error creating macro expand_streams: %w", row.Err())
+	return row.Err()
+}
+
+func CreateMacros(db *sql.DB) error {
+	var err error
+
+	err = CreateNewStreamsMacro(db)
+	if err != nil {
+		return fmt.Errorf("creating macro new_streams_with_limit: %w", err)
+	}
+
+	err = CreateExpandStreamsMacro(db)
+	if err != nil {
+		return fmt.Errorf("creating macro expand_streams: %w", err)
 	}
 
 	return nil
