@@ -101,7 +101,7 @@ func ScanColumns(rows *sql.Rows, slicesOut ...any) error {
 }
 
 func TestUploadActivityJson(t *testing.T) {
-	testFile := "testUploadActivityJson.duckdb"
+	testFile := ""
 	require := require.New(t)
 	DBTest(t, testFile, Close, func(db *sql.DB) {
 		s1 := `{"Activity":{"id":10}}`
@@ -135,80 +135,115 @@ func TestUploadActivityJson(t *testing.T) {
 	})
 }
 
+type expectedMergeEffects struct {
+	etlIds             []int64
+	activityIds        []int64
+	activityIdsFromDoc []int64
+	resolutions        []sql.NullString
+
+	streamsEtlIds      []int64
+	streamsActivityIds []int64
+	streamsTimes       []int64
+	streamsWatts       []int64
+}
+
+func mergeActivitiesAndAssertEffects(
+	t *testing.T,
+	db *sql.DB,
+	expectedMergeEffects expectedMergeEffects) {
+	require := require.New(t)
+	require.NoError(MergeActivities(db))
+
+	// assert activities
+	rows, err := db.Query(`
+		select etl_id, activity_id, activity.id, streamset.watts.resolution
+		from activities
+		order by activity_id;`)
+	require.NoError(err)
+	defer rows.Close()
+
+	var etlIds []int64
+	var activityIds []int64
+	var activityIdsFromDoc []int64
+	var resolutions []sql.NullString
+	err = ScanColumns(rows, &etlIds, &activityIds, &activityIdsFromDoc, &resolutions)
+	require.NoError(err)
+
+	require.EqualValues(expectedMergeEffects.etlIds, etlIds)
+	require.EqualValues(expectedMergeEffects.activityIds, activityIds)
+	require.EqualValues(expectedMergeEffects.activityIdsFromDoc, activityIdsFromDoc)
+	require.EqualValues(expectedMergeEffects.resolutions, resolutions)
+
+	// assert streams
+	rows, err = db.Query(`
+		select etl_id, activity_id, time, watts
+		from streams
+		order by activity_id, time;`)
+	require.NoError(err)
+	defer rows.Close()
+
+	etlIds = nil
+	activityIds = nil
+	var times []int64
+	var watts []int64
+	err = ScanColumns(rows, &etlIds, &activityIds, &times, &watts)
+	require.NoError(err)
+
+	require.EqualValues(expectedMergeEffects.streamsEtlIds, etlIds)
+	require.EqualValues(expectedMergeEffects.streamsActivityIds, activityIds)
+	require.EqualValues(expectedMergeEffects.streamsTimes, times)
+	require.EqualValues(expectedMergeEffects.streamsWatts, watts)
+}
+
 func TestMergeActivities(t *testing.T) {
-	testFile := "testMergeActivities.duckdb"
+	testFile := ""
 	require := require.New(t)
 
-	DBTest(t, testFile, LeaveOpen, func(db *sql.DB) {
-		s1 := `{"Activity":{"id":10},"StreamSet":{"watts":{"resolution":"asdf","data":[0.0, 100.0, 150.0]},"time":{"data":[0, 1, 2]}}}`
-		s2 := `{"Activity":{"id":20},"StreamSet":{"watts":{"data":[200.0, 300.0, 150.0]},"time":{"data":[0, 1, 2]}}}`
+	DBTest(t, testFile, Close, func(db *sql.DB) {
+		s1 := `{"Activity":{"id":10},"StreamSet":{"watts":{"resolution":"asdf","data":[0, 100, 150]},"time":{"data":[0, 1, 2]}}}`
+		s2 := `{"Activity":{"id":20},"StreamSet":{"watts":{"data":[200, 300, 150]},"time":{"data":[0, 1, 2]}}}`
 		require.NoError(UploadActivityJson(db, []StringJsonable{StringJsonable(s1), StringJsonable(s2)}))
 
-		require.NoError(MergeActivities(db))
-		rows, err := db.Query(`
-		select etl_id, activity_id, activity.id, streamset.watts.resolution
-		from activities
-		order by activity_id;`)
-		require.NoError(err)
-		defer rows.Close()
+		mergeActivitiesAndAssertEffects(t, db, expectedMergeEffects{
+			etlIds:             []int64{1, 2},
+			activityIds:        []int64{10, 20},
+			activityIdsFromDoc: []int64{10, 20},
+			resolutions:        []sql.NullString{{String: "asdf", Valid: true}, {}},
 
-		var etlIds []int64
-		var activityIds []int64
-		var activityIdsFromDoc []int64
-		var resolutions []sql.NullString
-		err = ScanColumns(rows, &etlIds, &activityIds, &activityIdsFromDoc, &resolutions)
-		require.NoError(err)
-
-		require.EqualValues([]int64{1, 2}, etlIds)
-		require.EqualValues([]int64{10, 20}, activityIds)
-		require.EqualValues([]int64{10, 20}, activityIdsFromDoc)
-		require.EqualValues([]sql.NullString{{String: "asdf", Valid: true}, {}}, resolutions)
+			streamsEtlIds:      []int64{1, 1, 1, 2, 2, 2},
+			streamsActivityIds: []int64{10, 10, 10, 20, 20, 20},
+			streamsTimes:       []int64{0, 1, 2, 0, 1, 2},
+			streamsWatts:       []int64{0, 100, 150, 200, 300, 150},
+		})
 
 		// should be idempotent
-		require.NoError(MergeActivities(db))
-		rows, err = db.Query(`
-		select etl_id, activity_id, activity.id, streamset.watts.resolution
-		from activities
-		order by activity_id;`)
-		require.NoError(err)
-		defer rows.Close()
+		mergeActivitiesAndAssertEffects(t, db, expectedMergeEffects{
+			etlIds:             []int64{1, 2},
+			activityIds:        []int64{10, 20},
+			activityIdsFromDoc: []int64{10, 20},
+			resolutions:        []sql.NullString{{String: "asdf", Valid: true}, {}},
 
-		etlIds = etlIds[:0]
-		activityIds = activityIds[:0]
-		activityIdsFromDoc = activityIdsFromDoc[:0]
-		resolutions = resolutions[:0]
-		err = ScanColumns(rows, &etlIds, &activityIds, &activityIdsFromDoc, &resolutions)
-		require.NoError(err)
-
-		require.EqualValues([]int64{1, 2}, etlIds)
-		require.EqualValues([]int64{10, 20}, activityIds)
-		require.EqualValues([]int64{10, 20}, activityIdsFromDoc)
-		require.EqualValues([]sql.NullString{{String: "asdf", Valid: true}, {}}, resolutions)
+			streamsEtlIds:      []int64{1, 1, 1, 2, 2, 2},
+			streamsActivityIds: []int64{10, 10, 10, 20, 20, 20},
+			streamsTimes:       []int64{0, 1, 2, 0, 1, 2},
+			streamsWatts:       []int64{0, 100, 150, 200, 300, 150},
+		})
 
 		// now insert additional activities, some new and some duplicates
-		s3 := `{"Activity":{"id":30},"StreamSet":{"watts":{"data":[500.0, 100.0, 150.0]},"time":{"data":[0, 1, 2]}}}`
+		s3 := `{"Activity":{"id":30},"StreamSet":{"watts":{"data":[500, 100, 150]},"time":{"data":[0, 1, 2]}}}`
 		require.NoError(UploadActivityJson(db, []StringJsonable{StringJsonable(s1), StringJsonable(s3)}))
-		require.NoError(MergeActivities(db))
 
-		rows, err = db.Query(`
-		select etl_id, activity_id, activity.id, streamset.watts.resolution
-		from activities
-		order by activity_id;`)
-		require.NoError(err)
-		defer rows.Close()
+		mergeActivitiesAndAssertEffects(t, db, expectedMergeEffects{
+			etlIds:             []int64{3, 2, 4},
+			activityIds:        []int64{10, 20, 30},
+			activityIdsFromDoc: []int64{10, 20, 30},
+			resolutions:        []sql.NullString{{String: "asdf", Valid: true}, {}, {}},
 
-		etlIds = etlIds[:0]
-		activityIds = activityIds[:0]
-		activityIdsFromDoc = activityIdsFromDoc[:0]
-		resolutions = resolutions[:0]
-		err = ScanColumns(rows, &etlIds, &activityIds, &activityIdsFromDoc, &resolutions)
-		require.NoError(err)
-		require.EqualValues([]int64{3, 2, 4}, etlIds)
-		require.EqualValues([]int64{10, 20, 30}, activityIds)
-		require.EqualValues([]int64{10, 20, 30}, activityIdsFromDoc)
-		require.EqualValues([]sql.NullString{{String: "asdf", Valid: true}, {}, {}}, resolutions)
-
-		// TODO validate streams
+			streamsEtlIds:      []int64{3, 3, 3, 2, 2, 2, 4, 4, 4},
+			streamsActivityIds: []int64{10, 10, 10, 20, 20, 20, 30, 30, 30},
+			streamsTimes:       []int64{0, 1, 2, 0, 1, 2, 0, 1, 2},
+			streamsWatts:       []int64{0, 100, 150, 200, 300, 150, 500, 100, 150},
+		})
 	})
 }
 

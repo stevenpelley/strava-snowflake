@@ -227,7 +227,7 @@ select
 	try_cast(json_extract("json", '$.Activity') as ACTIVITY_T),
 	try_cast(json_extract("json", '$.StreamSet') as STREAMSET_NODATA_T)
 from deduped_etl
-where coalesce(etl_id > (select etl_id from activities where deduped_etl.activity_id = activities.activity_id), true)
+where coalesce(etl_id > (select max(etl_id) from activities where deduped_etl.activity_id = activities.activity_id), true)
 	;`,
 		newActivitiesView)
 	row := db.QueryRow(sqlText)
@@ -242,7 +242,7 @@ select
 	etl_id,
 	s.*
 from deduped_etl, expand_streams(try_cast(json_extract(deduped_etl."json", '$.StreamSet') as STREAMSET_T)) as s
-where coalesce(etl_id > (select etl_id from activities where deduped_etl.activity_id = activities.activity_id), true)
+where coalesce(etl_id > (select max(etl_id) from streams where deduped_etl.activity_id = streams.activity_id), true)
 	;`,
 		newStreamsView)
 	row := db.QueryRow(sqlText)
