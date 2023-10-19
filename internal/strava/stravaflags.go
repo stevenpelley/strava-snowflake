@@ -3,11 +3,13 @@ package strava
 import (
 	"bufio"
 	"flag"
-	"log"
+	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/stevenpelley/strava-snowflake/internal/util"
 )
 
 type StravaFlags struct {
@@ -20,18 +22,21 @@ type StravaFlags struct {
 	OauthTokenFile           string
 }
 
-// must be called before flag.Parse().  Panics on any error
-func (sf *StravaFlags) InitFlags() {
+// prove it is flags
+var _ util.Flags = &StravaFlags{}
+
+// must be called before flag.Parse().
+func (sf *StravaFlags) InitFlags() error {
 	defaultStartDurationAgo, err := time.ParseDuration("-168h")
 	if err != nil {
-		log.Panicf("error construction flag default duration: %v", err)
+		return fmt.Errorf("error construction flag default duration: %w", err)
 	}
 	flag.DurationVar(&sf.startDurationAgo, "startdurationago", defaultStartDurationAgo,
 		"duration relative to \"now\" to start retrieving activities")
 
 	defaultEndDurationAgo, err := time.ParseDuration("0")
 	if err != nil {
-		log.Panicf("error construction flag default duration: %v", err)
+		return fmt.Errorf("error construction flag default duration: %w", err)
 	}
 	flag.DurationVar(&sf.endDurationAgo, "enddurationago", defaultEndDurationAgo,
 		"duration relative to \"now\" to stop retrieving activities")
@@ -41,7 +46,7 @@ func (sf *StravaFlags) InitFlags() {
 
 	defaultActivitiesTimeoutDuration, err := time.ParseDuration("30s")
 	if err != nil {
-		log.Panicf("error construction flag default duration: %v", err)
+		return fmt.Errorf("error construction flag default duration: %w", err)
 	}
 	flag.DurationVar(
 		&sf.Config.ActivitiesTimeoutDuration,
@@ -51,7 +56,7 @@ func (sf *StravaFlags) InitFlags() {
 
 	defaultStreamsTimeoutDuration, err := time.ParseDuration("60s")
 	if err != nil {
-		log.Panicf("error construction flag default duration: %v", err)
+		return fmt.Errorf("error construction flag default duration: %w", err)
 	}
 	flag.DurationVar(
 		&sf.Config.StreamsTimeoutDuration,
@@ -80,20 +85,22 @@ func (sf *StravaFlags) InitFlags() {
 	})
 
 	flag.StringVar(&sf.ignoreIdsFile, "ignoreidsfile", "", "file containing newline delimited activity ids to ignore.  Recommend creating this file with jq .Activities.id from previous runs")
+
+	return nil
 }
 
 // must be called after flag.Parse().  Panics on any error
-func (sf *StravaFlags) PostProcessFlags() {
+func (sf *StravaFlags) PostProcessFlags() error {
 	if sf.startDurationAgo > 0 {
-		log.Panicf("startDurationAgo must be nonpositive (cannot be in the future): %v",
+		return fmt.Errorf("startDurationAgo must be nonpositive (cannot be in the future): %v",
 			sf.startDurationAgo)
 	}
 	if sf.endDurationAgo > 0 {
-		log.Panicf("startDurationAgo must be nonpositive (cannot be in the future): %v",
+		return fmt.Errorf("startDurationAgo must be nonpositive (cannot be in the future): %v",
 			sf.endDurationAgo)
 	}
 	if sf.startDurationAgo > sf.endDurationAgo {
-		log.Panicf("startDurationAgo is more recent than endDurationAgo. start: %v. end: %v",
+		return fmt.Errorf("startDurationAgo is more recent than endDurationAgo. start: %v. end: %v",
 			sf.startDurationAgo, sf.endDurationAgo)
 	}
 
@@ -104,7 +111,7 @@ func (sf *StravaFlags) PostProcessFlags() {
 	if sf.ignoreIdsFile != "" {
 		f, err := os.Open(sf.ignoreIdsFile)
 		if err != nil {
-			log.Panicf("failed to open file %v: %v", sf.ignoreIdsFile, err)
+			return fmt.Errorf("failed to open file %v: %w", sf.ignoreIdsFile, err)
 		}
 		defer f.Close()
 		scanner := bufio.NewScanner(f)
@@ -112,12 +119,12 @@ func (sf *StravaFlags) PostProcessFlags() {
 			s := scanner.Text()
 			i, err := strconv.Atoi(s)
 			if err != nil {
-				log.Panicf("failed to convert line to int.  line: %v. error: %v", s, err)
+				return fmt.Errorf("failed to convert line to int.  line: %v. error: %w", s, err)
 			}
 			sf.activityIdsToIgnoreSlice = append(sf.activityIdsToIgnoreSlice, int64(i))
 		}
 		if err = scanner.Err(); err != nil {
-			log.Panicf("error while scanning ignoreidsfile: %v", err)
+			return fmt.Errorf("error while scanning ignoreidsfile: %w", err)
 		}
 	}
 
@@ -126,4 +133,6 @@ func (sf *StravaFlags) PostProcessFlags() {
 		sf.Config.ActivityIdsToIgnore[i] = struct{}{}
 	}
 	slog.Debug("initialized inputs", "slice", sf.activityIdsToIgnoreSlice, "config", sf.Config)
+
+	return nil
 }

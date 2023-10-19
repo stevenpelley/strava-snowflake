@@ -1,5 +1,5 @@
 // functions to create and verify our schema.  Should rely only on database/sql
-package intsql
+package intduckdb
 
 import (
 	"database/sql"
@@ -7,13 +7,13 @@ import (
 	"reflect"
 )
 
-func InitAndValidateSchema(db *sql.DB) error {
-	err := InitSchema(db)
+func (sdb *DuckdbStrava) InitAndValidateSchema() error {
+	err := InitSchema(sdb.db)
 	if err != nil {
 		return fmt.Errorf("initializing data schema: %w", err)
 	}
 
-	err = ValidateSchema(db)
+	err = ValidateSchema(sdb.db)
 	if err != nil {
 		return fmt.Errorf("validating schema: %w", err)
 	}

@@ -5,45 +5,52 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/stevenpelley/strava-snowflake/internal/intsql"
+	"github.com/stevenpelley/strava-snowflake/internal/intsql/intduckdb"
 	"github.com/stevenpelley/strava-snowflake/internal/strava"
+	"github.com/stevenpelley/strava-snowflake/internal/util"
 )
 
 func main() {
 	strava.InitLogging("activitiessql.log")
 
 	stravaFlags := strava.StravaFlags{}
-	stravaFlags.InitFlags()
-	duckdbFlags := intsql.DuckdbFlags{}
-	duckdbFlags.InitFlags()
+	duckdbFlags := intduckdb.DuckdbFlags{}
+	err := util.InitAllFlags(&stravaFlags, &duckdbFlags)
+	if err != nil {
+		log.Panicf("error initializing flags: %v", err)
+	}
 
 	var mergeOnly bool
 	flag.BoolVar(&mergeOnly, "mergeonly", false, "if true perform merge from existing data.  Do not retrieve.")
 
 	flag.Parse()
 
-	stravaFlags.PostProcessFlags()
-	config := &stravaFlags.Config
-	duckdbFlags.PostProcessFlags()
+	err = util.PostProcessAllFlags(&stravaFlags, &duckdbFlags)
+	if err != nil {
+		log.Panicf("error postprocessing flags: %v", err)
+	}
 
-	db, err := intsql.OpenDB(duckdbFlags.DbFileName)
+	config := &stravaFlags.Config
+
+	var sdb intduckdb.DuckdbStrava
+	err = sdb.OpenDB(duckdbFlags.DbFileName)
 	if err != nil {
 		log.Panicf("error opening db file %v: %v", duckdbFlags.DbFileName, err)
 	}
-	defer db.Close()
+	defer sdb.Close()
 
 	var getActivitiesErr error
 	if !mergeOnly {
-		err = intsql.InitAndValidateSchema(db)
+		err = sdb.InitAndValidateSchema()
 		if err != nil {
 			log.Panicf("error initializing data schema: %v", err)
 		}
 
-		activityIdsToIgnore, err := intsql.GetExistingActivityIds(db)
+		activityIdsToIgnore, err := sdb.GetExistingActivityIds()
 		if err != nil {
 			log.Panicf("error loading existing activity ids: %v", err)
 		}
-		for activityId, _ := range activityIdsToIgnore {
+		for activityId := range activityIdsToIgnore {
 			config.ActivityIdsToIgnore[activityId] = struct{}{}
 		}
 
@@ -55,7 +62,7 @@ func main() {
 
 		// recall that this may return a partial result alongside an error
 
-		var activities []*strava.ActivityAndStream
+		var activities []util.Jsonable
 		activities, getActivitiesErr = strava.GetActivitiesAndStreams(config)
 
 		if len(activities) == 0 {
@@ -66,13 +73,13 @@ func main() {
 			return
 		}
 
-		err = intsql.UploadActivityJson(db, activities)
+		err = sdb.UploadActivityJson(activities)
 		if err != nil {
 			log.Panicf("error loading json: %v", err)
 		}
 	}
 
-	err = intsql.MergeActivities(db)
+	err = sdb.MergeActivities()
 	if err != nil {
 		log.Panicf("error merging activities: %v", err)
 	}

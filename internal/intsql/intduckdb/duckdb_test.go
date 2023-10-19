@@ -1,4 +1,4 @@
-package intsql
+package intduckdb
 
 import (
 	"database/sql"
@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/stevenpelley/strava-snowflake/internal/util"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,6 +16,14 @@ type StringJsonable string
 
 func (sj StringJsonable) ToJson() string {
 	return string(sj)
+}
+
+func toJsonables(slice []StringJsonable) []util.Jsonable {
+	s := make([]util.Jsonable, 0, len(slice))
+	for _, sj := range slice {
+		s = append(s, sj)
+	}
+	return s
 }
 
 func deleteTestFile(t *testing.T, testFile string) {
@@ -40,17 +49,18 @@ const (
 	LeaveOpen
 )
 
-func DBTest(t *testing.T, testFile string, closeDb closeDb, f func(db *sql.DB)) {
+func DBTest(t *testing.T, testFile string, closeDb closeDb, f func(sdb *DuckdbStrava)) {
 	deleteTestFile(t, testFile)
 	if closeDb == Close {
 		defer deleteTestFile(t, testFile)
 	}
-	db, err := OpenDB(testFile)
+	sdb := DuckdbStrava{}
+	err := sdb.OpenDB(testFile)
 	require.NoError(t, err)
-	defer db.Close()
+	defer sdb.Close()
 
-	require.NoError(t, InitAndValidateSchema(db))
-	f(db)
+	require.NoError(t, sdb.InitAndValidateSchema())
+	f(&sdb)
 }
 
 // scan the rows column-wise into the slices pointed to by ...any
@@ -103,14 +113,15 @@ func ScanColumns(rows *sql.Rows, slicesOut ...any) error {
 func TestUploadActivityJson(t *testing.T) {
 	testFile := ""
 	require := require.New(t)
-	DBTest(t, testFile, Close, func(db *sql.DB) {
+	DBTest(t, testFile, Close, func(sdb *DuckdbStrava) {
 		s1 := `{"Activity":{"id":10}}`
 		s2 := `{"Activity":{"id":20}}`
 		// interface for comparison with generically scanned data
 		ss := []string{s1, s2}
-		require.NoError(UploadActivityJson(db, []StringJsonable{StringJsonable(s1), StringJsonable(s2)}))
+		require.NoError(sdb.UploadActivityJson(toJsonables(
+			[]StringJsonable{StringJsonable(s1), StringJsonable(s2)})))
 
-		rows, err := db.Query(`select * from temp_etl;`)
+		rows, err := sdb.db.Query(`select * from temp_etl;`)
 		require.NoError(err)
 		defer rows.Close()
 		var scanned []string
@@ -118,7 +129,7 @@ func TestUploadActivityJson(t *testing.T) {
 		require.NoError(err)
 		require.EqualValues(scanned, ss)
 
-		rows, err = db.Query(`select * from etl;`)
+		rows, err = sdb.db.Query(`select * from etl;`)
 		require.NoError(err)
 		defer rows.Close()
 		var scanned0 []int64
@@ -149,13 +160,13 @@ type expectedMergeEffects struct {
 
 func mergeActivitiesAndAssertEffects(
 	t *testing.T,
-	db *sql.DB,
+	sdb *DuckdbStrava,
 	expectedMergeEffects expectedMergeEffects) {
 	require := require.New(t)
-	require.NoError(MergeActivities(db))
+	require.NoError(sdb.MergeActivities())
 
 	// assert activities
-	rows, err := db.Query(`
+	rows, err := sdb.db.Query(`
 		select etl_id, activity_id, activity.id, streamset.watts.resolution
 		from activities
 		order by activity_id;`)
@@ -175,7 +186,7 @@ func mergeActivitiesAndAssertEffects(
 	require.EqualValues(expectedMergeEffects.resolutions, resolutions)
 
 	// assert streams
-	rows, err = db.Query(`
+	rows, err = sdb.db.Query(`
 		select etl_id, activity_id, time, watts
 		from streams
 		order by activity_id, time;`)
@@ -199,12 +210,13 @@ func TestMergeActivities(t *testing.T) {
 	testFile := ""
 	require := require.New(t)
 
-	DBTest(t, testFile, Close, func(db *sql.DB) {
+	DBTest(t, testFile, Close, func(sdb *DuckdbStrava) {
 		s1 := `{"Activity":{"id":10},"StreamSet":{"watts":{"resolution":"asdf","data":[0, 100, 150]},"time":{"data":[0, 1, 2]}}}`
 		s2 := `{"Activity":{"id":20},"StreamSet":{"watts":{"data":[200, 300, 150]},"time":{"data":[0, 1, 2]}}}`
-		require.NoError(UploadActivityJson(db, []StringJsonable{StringJsonable(s1), StringJsonable(s2)}))
+		require.NoError(sdb.UploadActivityJson(toJsonables(
+			[]StringJsonable{StringJsonable(s1), StringJsonable(s2)})))
 
-		mergeActivitiesAndAssertEffects(t, db, expectedMergeEffects{
+		mergeActivitiesAndAssertEffects(t, sdb, expectedMergeEffects{
 			etlIds:             []int64{1, 2},
 			activityIds:        []int64{10, 20},
 			activityIdsFromDoc: []int64{10, 20},
@@ -217,7 +229,7 @@ func TestMergeActivities(t *testing.T) {
 		})
 
 		// should be idempotent
-		mergeActivitiesAndAssertEffects(t, db, expectedMergeEffects{
+		mergeActivitiesAndAssertEffects(t, sdb, expectedMergeEffects{
 			etlIds:             []int64{1, 2},
 			activityIds:        []int64{10, 20},
 			activityIdsFromDoc: []int64{10, 20},
@@ -231,9 +243,10 @@ func TestMergeActivities(t *testing.T) {
 
 		// now insert additional activities, some new and some duplicates
 		s3 := `{"Activity":{"id":30},"StreamSet":{"watts":{"data":[500, 100, 150]},"time":{"data":[0, 1, 2]}}}`
-		require.NoError(UploadActivityJson(db, []StringJsonable{StringJsonable(s1), StringJsonable(s3)}))
+		require.NoError(sdb.UploadActivityJson(toJsonables(
+			[]StringJsonable{StringJsonable(s1), StringJsonable(s3)})))
 
-		mergeActivitiesAndAssertEffects(t, db, expectedMergeEffects{
+		mergeActivitiesAndAssertEffects(t, sdb, expectedMergeEffects{
 			etlIds:             []int64{3, 2, 4},
 			activityIds:        []int64{10, 20, 30},
 			activityIdsFromDoc: []int64{10, 20, 30},
@@ -249,14 +262,14 @@ func TestMergeActivities(t *testing.T) {
 
 func TestScanColumns(t *testing.T) {
 	require := require.New(t)
-	DBTest(t, "", Close, func(db *sql.DB) {
-		row := db.QueryRow("create table t(c1 int64, c2 string);")
+	DBTest(t, "", Close, func(sdb *DuckdbStrava) {
+		row := sdb.db.QueryRow("create table t(c1 int64, c2 string);")
 		require.NoError(row.Err())
 
-		row = db.QueryRow("insert into t values (1, 'asdf'), (2, 'qwer');")
+		row = sdb.db.QueryRow("insert into t values (1, 'asdf'), (2, 'qwer');")
 		require.NoError(row.Err())
 
-		rows, err := db.Query("select * from t;")
+		rows, err := sdb.db.Query("select * from t;")
 		require.NoError(err)
 		defer rows.Close()
 

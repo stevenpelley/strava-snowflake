@@ -165,7 +165,7 @@ func (aas *ActivityAndStream) ToJson() string {
 }
 
 // note that this may return a partial result even when error is not nil
-func GetActivitiesAndStreams(config *ActivitiesConfig) ([]*ActivityAndStream, error) {
+func GetActivitiesAndStreams(config *ActivitiesConfig) ([]util.Jsonable, error) {
 	activities, err := RetrieveActivities(config)
 	if err != nil {
 		return nil, fmt.Errorf("retrieving activities: %w", err)
@@ -219,7 +219,7 @@ func GetActivitiesAndStreams(config *ActivitiesConfig) ([]*ActivityAndStream, er
 		}))
 
 	slog.Info("zipping result streams", "untruncated activities size", len(streams))
-	zipped := make([]*ActivityAndStream, 0, len(activities))
+	zipped := make([]util.Jsonable, 0, len(activities))
 	for i := 0; i < len(activities); i++ {
 		activity := activities[i]
 		stream := streams[i]
