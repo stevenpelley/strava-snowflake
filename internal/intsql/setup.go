@@ -11,13 +11,11 @@ import (
 )
 
 type DuckdbFlags struct {
-	DbFileName      string
-	StreamsEtlLimit int64
+	DbFileName string
 }
 
 func (df *DuckdbFlags) InitFlags() {
 	flag.StringVar(&df.DbFileName, "duckdbfile", "", "duckdb database file (empty for memory database)")
-	flag.Int64Var(&df.StreamsEtlLimit, "streamsetllimit", 100, "limit number of streams rows to ingest at a time to control memory usage")
 }
 
 func (df *DuckdbFlags) PostProcessFlags() {
@@ -29,7 +27,6 @@ func OpenDB(dbFileName string) (*sql.DB, error) {
 		bootQueries := []string{
 			"INSTALL 'json'",
 			"LOAD 'json'",
-			"SET memory_limit='8GB';",
 		}
 
 		for _, qry := range bootQueries {

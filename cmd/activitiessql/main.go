@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 
 	"github.com/stevenpelley/strava-snowflake/internal/intsql"
@@ -57,13 +58,21 @@ func main() {
 		var activities []*strava.ActivityAndStream
 		activities, getActivitiesErr = strava.GetActivitiesAndStreams(config)
 
+		if len(activities) == 0 {
+			if getActivitiesErr != nil {
+				log.Panicf(": %v", getActivitiesErr)
+			}
+			fmt.Println("no new activities found")
+			return
+		}
+
 		err = intsql.UploadActivityJson(db, activities)
 		if err != nil {
 			log.Panicf("error loading json: %v", err)
 		}
 	}
 
-	err = intsql.MergeActivities(db, duckdbFlags.StreamsEtlLimit)
+	err = intsql.MergeActivities(db)
 	if err != nil {
 		log.Panicf("error merging activities: %v", err)
 	}

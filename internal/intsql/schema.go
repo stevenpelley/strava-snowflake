@@ -70,7 +70,7 @@ func ValidateSchema(db *sql.DB) error {
 	}
 	rows.Close()
 
-	expected = []string{"expand_streams", "new_streams_with_limit"}
+	expected = []string{"expand_streams"}
 	if !reflect.DeepEqual(expected, results) {
 		return fmt.Errorf(
 			"unexpected existing macros.  Expected %v.  Found: %v",
@@ -122,6 +122,11 @@ func InitSchema(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("create new_activities: %w", err)
 	}
+	err = CreateNewStreamsView(db)
+	if err != nil {
+		return fmt.Errorf("creating macro new_streams: %w", err)
+	}
+
 	err = CreateMacros(db)
 	if err != nil {
 		return fmt.Errorf("create macros: %w", err)
@@ -258,9 +263,9 @@ func CreateTypes(db *sql.DB) error {
 	return nil
 }
 
-func CreateNewStreamsMacro(db *sql.DB) error {
+func CreateNewStreamsView(db *sql.DB) error {
 	sqlText := `
-create macro if not exists new_streams_with_limit(n) as table
+create view if not exists new_streams as
 select e.activity_id, e.etl_id, expanded.* from
 	(
 		select
@@ -273,7 +278,6 @@ select e.activity_id, e.etl_id, expanded.* from
 				from streams
 				where d.activity_id = streams.activity_id),
 			true)
-		limit n
 	) as e,
 	expand_streams(e.ss) expanded
 	;`
@@ -302,12 +306,6 @@ func CreateExpandStreamsMacro(db *sql.DB) error {
 
 func CreateMacros(db *sql.DB) error {
 	var err error
-
-	err = CreateNewStreamsMacro(db)
-	if err != nil {
-		return fmt.Errorf("creating macro new_streams_with_limit: %w", err)
-	}
-
 	err = CreateExpandStreamsMacro(db)
 	if err != nil {
 		return fmt.Errorf("creating macro expand_streams: %w", err)

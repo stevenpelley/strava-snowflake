@@ -11,3 +11,5 @@
 *.log
 *.swp
 /.tmp
+/etl.json
+*.gzip

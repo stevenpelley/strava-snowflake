@@ -92,19 +92,17 @@ func UploadActivityJson[T util.Jsonable](db *sql.DB, activities []T) error {
 	return nil
 }
 
-func MergeActivities(db *sql.DB, streamsLimit int64) error {
+func MergeActivities(db *sql.DB) error {
 	// TODO
-	// reintroduce the transaction
 	// remove the limit for new streams
 
 	slog.Info("MergeActivities")
-	//txn, err := db.Begin()
-	//if err != nil {
-	//	return fmt.Errorf("starting transaction: %w", err)
-	//}
-	//defer txn.Rollback()
-	//var dbCtx QueryRowContextable = txn
-	var dbCtx QueryRowContextable = db
+	txn, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("starting transaction: %w", err)
+	}
+	defer txn.Rollback()
+	var dbCtx QueryRowContextable = txn
 
 	// insert on conflict (merge) is not supported in duckdb for anything including a list type,
 	// which appears to include lists nested in structs.  So we will transactionally delete all
@@ -141,29 +139,18 @@ func MergeActivities(db *sql.DB, streamsLimit int64) error {
 	LogRowResponse(row, "insert new activities")
 
 	// insert the new rows into streams
-	slog.Info("inserting into streams in batches", "limit", streamsLimit)
-	sqlText = fmt.Sprintf(`insert into streams select * from new_streams_with_limit(%v);`, streamsLimit)
-	keepGoing := true
-	for keepGoing {
-		row = QueryRowContext(context.TODO(), dbCtx, "insert new streams", sqlText)
-		if row.Err() != nil {
-			return fmt.Errorf("inserting new streams: %w", row.Err())
-		}
-		var i int64
-		err := row.Scan(&i)
-		if err != nil {
-			return fmt.Errorf("insert new streams on scan: %w", err)
-		}
-		slog.Info("inserted new streams",
-			"tag", []string{"sql", "response"},
-			"response", i)
-		keepGoing = i > 0
+	slog.Info("inserting into streams in batches")
+	sqlText = `insert into streams select * from new_streams;`
+	row = QueryRowContext(context.TODO(), dbCtx, "insert new streams", sqlText)
+	if row.Err() != nil {
+		return fmt.Errorf("inserting new streams: %w", row.Err())
 	}
+	LogRowResponse(row, "insert new streams")
 
-	////err = txn.Commit()
-	////if err != nil {
-	////	return fmt.Errorf("committing: %w", err)
-	////}
+	err = txn.Commit()
+	if err != nil {
+		return fmt.Errorf("committing: %w", err)
+	}
 
 	return nil
 }
