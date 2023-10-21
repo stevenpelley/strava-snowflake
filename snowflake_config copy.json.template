@@ -1,0 +1,5 @@
+{
+    "account": "snowflakeaccount",
+    "user": "the_user",
+    "private_key_file": "/Users/asdf/rsa_key.p8"
+}

@@ -1,5 +1,6 @@
 /oauth_client_config.json
 /token.json
+/snowflake_config.json
 /athlete
 /activities
 /activities.json
