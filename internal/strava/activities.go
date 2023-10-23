@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
-	"slices"
 	"time"
 
 	"github.com/fatih/structs"
@@ -146,11 +145,11 @@ func GetAbridgedActivity(o *strava3golang.SummaryActivity) AbridgedSummaryActivi
 	}
 }
 
-func MapSummaryActivitiesToAbridged(
-	activities []strava3golang.SummaryActivity) []AbridgedSummaryActivity {
+func MapActivitiesToAbridged(
+	activities []Activity) []AbridgedSummaryActivity {
 	vals := make([]AbridgedSummaryActivity, len(activities))
 	for i, a := range activities {
-		vals[i] = GetAbridgedActivity(&a)
+		vals[i] = GetAbridgedActivity(a.summaryActivity)
 	}
 	return vals
 }
@@ -164,34 +163,38 @@ func (aas *ActivityAndStream) ToJson() string {
 	return util.MarshalOrPanic(aas)
 }
 
-// note that this may return a partial result even when error is not nil
-func GetActivitiesAndStreams(config *ActivitiesConfig) ([]util.Jsonable, error) {
+type Activity struct {
+	summaryActivity *strava3golang.SummaryActivity
+}
+
+func (a Activity) GetId() int64 {
+	return *a.summaryActivity.Id
+}
+
+func getActivities(config *ActivitiesConfig) ([]Activity, error) {
 	activities, err := RetrieveActivities(config)
 	if err != nil {
 		return nil, fmt.Errorf("retrieving activities: %w", err)
 	}
 
+	results := make([]Activity, len(activities))
+	for i := 0; i < len(activities); i++ {
+		results[i] = Activity{&activities[i]}
+	}
+
 	slog.Info("retrieved activities",
 		"length", len(activities),
 		"activities", util.LogValueFunc(func() any {
-			return MapSummaryActivitiesToAbridged(activities)
+			return MapActivitiesToAbridged(results)
 		}))
 
-	// filter out activities to be ignored
-	activities = slices.DeleteFunc(activities, func(a strava3golang.SummaryActivity) bool {
-		_, ok := config.ActivityIdsToIgnore[*a.Id]
-		return ok
-	})
+	return results, nil
+}
 
-	slog.Info("filtered activities",
-		"length", len(activities),
-		"activities", util.LogValueFunc(func() any {
-			return MapSummaryActivitiesToAbridged(activities)
-		}))
-
+func getStreams(config *ActivitiesConfig, activities []Activity) ([]util.Jsonable, error) {
 	activityIds := make([]int64, len(activities))
 	for i, activity := range activities {
-		activityIds[i] = *activity.Id
+		activityIds[i] = activity.GetId()
 	}
 	streams, err := RetrieveStreams(config, activityIds)
 	if err != nil {
@@ -221,14 +224,73 @@ func GetActivitiesAndStreams(config *ActivitiesConfig) ([]util.Jsonable, error) 
 	slog.Info("zipping result streams", "untruncated activities size", len(streams))
 	zipped := make([]util.Jsonable, 0, len(activities))
 	for i := 0; i < len(activities); i++ {
-		activity := activities[i]
+		activity := activities[i].summaryActivity
 		stream := streams[i]
 		if stream != nil {
-			zipped = append(zipped, &ActivityAndStream{Activity: &activity, StreamSet: stream})
+			zipped = append(zipped, &ActivityAndStream{Activity: activity, StreamSet: stream})
 		}
 	}
 	slog.Info("zipped result streams", "truncated activities size", len(zipped))
 
 	// may have been a partial result so return previous error
 	return zipped, err
+}
+
+// accepts a list of activity ids to consider.  Returns the list of activity
+// ids whose streams should be downloaded, or an error
+// it is expected that the returned ids are in the same relative order
+// as the inputs
+type ActivityFilter func([]int64) ([]int64, error)
+
+func filterActivities(activities []Activity, filter ActivityFilter) ([]Activity, error) {
+	activityIds := make([]int64, len(activities))
+	for i, v := range activities {
+		activityIds[i] = v.GetId()
+	}
+	activityIds, err := filter(activityIds)
+	if err != nil {
+		return nil, fmt.Errorf("FilterActivities: %w", err)
+	}
+
+	// expand ids back to activities
+	results := make([]Activity, 0)
+	nextActivityIdx := 0
+	for _, id := range activityIds {
+		for {
+			if nextActivityIdx >= len(activities) {
+				log.Panicf("failed to match activity ids and activities")
+			}
+
+			if id == activities[nextActivityIdx].GetId() {
+				results = append(results, activities[nextActivityIdx])
+				nextActivityIdx++
+				break
+			}
+			nextActivityIdx++
+		}
+	}
+
+	slog.Info("filtered activities",
+		"length", len(activities),
+		"activities", util.LogValueFunc(func() any {
+			return MapActivitiesToAbridged(results)
+		}))
+
+	return results, nil
+}
+
+// note that this may return a partial result even when error is not nil
+func GetActivitiesAndStreams(config *ActivitiesConfig, filter ActivityFilter) (
+	[]util.Jsonable, error) {
+	activities, err := getActivities(config)
+	if err != nil {
+		return nil, err
+	}
+
+	activities, err = filterActivities(activities, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	return getStreams(config, activities)
 }

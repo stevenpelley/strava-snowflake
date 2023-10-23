@@ -4,7 +4,6 @@ import (
 	"database/sql"
 
 	"github.com/stevenpelley/strava-snowflake/internal/intsql"
-	"github.com/stevenpelley/strava-snowflake/internal/strava"
 	"github.com/stevenpelley/strava-snowflake/internal/util"
 )
 
@@ -21,13 +20,13 @@ func (sdb *SFStrava) OpenDB(dbFileName string) error {
 	panic("unimplemented")
 }
 
-// GetExistingActivityIds implements intsql.StravaDatabase.
-func (sdb *SFStrava) GetExistingActivityIds() (strava.IntSet, error) {
+// InitAndValidateSchema implements intsql.StravaDatabase.
+func (sdb *SFStrava) InitAndValidateSchema() error {
 	panic("unimplemented")
 }
 
-// InitAndValidateSchema implements intsql.StravaDatabase.
-func (sdb *SFStrava) InitAndValidateSchema() error {
+// FilterKnownActivityIds implements intsql.StravaDatabase.
+func (*SFStrava) FilterKnownActivityIds(activityIds []int64) ([]int64, error) {
 	panic("unimplemented")
 }
 

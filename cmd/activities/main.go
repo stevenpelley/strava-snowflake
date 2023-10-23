@@ -32,7 +32,9 @@ func main() {
 	}
 	stravaFlags.Config.StravaClient = stravaClient
 
-	activities, err := strava.GetActivitiesAndStreams(&stravaFlags.Config)
+	activities, err := strava.GetActivitiesAndStreams(&stravaFlags.Config, func(activityIds []int64) ([]int64, error) {
+		return activityIds, nil
+	})
 	// may have been a partial result so output the result before checking the error
 	for _, aas := range activities {
 		fmt.Fprintf(os.Stdout, "%v\n", util.MarshalOrPanic(aas))

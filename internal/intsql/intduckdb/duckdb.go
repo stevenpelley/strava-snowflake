@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/marcboeker/go-duckdb"
 	"github.com/stevenpelley/strava-snowflake/internal/intsql"
@@ -44,7 +45,7 @@ func (sdb *DuckdbStrava) OpenDB(dbFileName string) error {
 	return nil
 }
 
-func (sdb *DuckdbStrava) GetExistingActivityIds() (strava.IntSet, error) {
+func (sdb *DuckdbStrava) getExistingActivityIds() (strava.IntSet, error) {
 	sqlText := `select activity_id from activities;`
 	rows, err := sdb.db.Query(sqlText)
 	if err != nil {
@@ -61,6 +62,20 @@ func (sdb *DuckdbStrava) GetExistingActivityIds() (strava.IntSet, error) {
 		set[i] = struct{}{}
 	}
 	return set, nil
+}
+
+func (sdb *DuckdbStrava) FilterKnownActivityIds(activityIds []int64) ([]int64, error) {
+	knownActivityIds, err := sdb.getExistingActivityIds()
+	if err != nil {
+		return nil, err
+	}
+
+	newActivityIds := slices.DeleteFunc(activityIds, func(id int64) bool {
+		_, ok := knownActivityIds[id]
+		return ok
+	})
+
+	return newActivityIds, nil
 }
 
 func (sdb *DuckdbStrava) UploadActivityJson(activities []util.Jsonable) error {

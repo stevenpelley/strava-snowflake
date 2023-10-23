@@ -46,14 +46,6 @@ func main() {
 			log.Panicf("error initializing data schema: %v", err)
 		}
 
-		activityIdsToIgnore, err := sdb.GetExistingActivityIds()
-		if err != nil {
-			log.Panicf("error loading existing activity ids: %v", err)
-		}
-		for activityId := range activityIdsToIgnore {
-			config.ActivityIdsToIgnore[activityId] = struct{}{}
-		}
-
 		stravaClient, err := strava.CreateStravaClient(&stravaFlags)
 		if err != nil {
 			log.Panicf("error creating strava client: %v", err)
@@ -63,7 +55,7 @@ func main() {
 		// recall that this may return a partial result alongside an error
 
 		var activities []util.Jsonable
-		activities, getActivitiesErr = strava.GetActivitiesAndStreams(config)
+		activities, getActivitiesErr = strava.GetActivitiesAndStreams(config, sdb.FilterKnownActivityIds)
 
 		if len(activities) == 0 {
 			if getActivitiesErr != nil {
