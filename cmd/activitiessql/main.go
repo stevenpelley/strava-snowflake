@@ -32,8 +32,8 @@ func main() {
 
 	config := &stravaFlags.Config
 
-	var sdb intduckdb.DuckdbStrava
-	err = sdb.OpenDB(duckdbFlags.DbFileName)
+	sdb := intduckdb.New(duckdbFlags.DbFileName)
+	err = sdb.OpenDB()
 	if err != nil {
 		log.Panicf("error opening db file %v: %v", duckdbFlags.DbFileName, err)
 	}

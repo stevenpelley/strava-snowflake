@@ -15,15 +15,20 @@ import (
 )
 
 type DuckdbStrava struct {
-	db *sql.DB
+	dbFileName string
+	db         *sql.DB
 }
 
 // prove it is a StravaDatabase
 var _ intsql.StravaDatabase = &DuckdbStrava{}
 
-func (sdb *DuckdbStrava) OpenDB(dbFileName string) error {
-	slog.Info("opening database", "filename", dbFileName)
-	connector, err := duckdb.NewConnector(dbFileName, func(execer driver.ExecerContext) error {
+func New(dbFileName string) DuckdbStrava {
+	return DuckdbStrava{dbFileName: dbFileName}
+}
+
+func (sdb *DuckdbStrava) OpenDB() error {
+	slog.Info("opening database", "filename", sdb.dbFileName)
+	connector, err := duckdb.NewConnector(sdb.dbFileName, func(execer driver.ExecerContext) error {
 		bootQueries := []string{
 			"INSTALL 'json'",
 			"LOAD 'json'",
@@ -43,6 +48,10 @@ func (sdb *DuckdbStrava) OpenDB(dbFileName string) error {
 
 	sdb.db = sql.OpenDB(connector)
 	return nil
+}
+
+func (sdb *DuckdbStrava) DB() *sql.DB {
+	return sdb.db
 }
 
 func (sdb *DuckdbStrava) getExistingActivityIds() (strava.IntSet, error) {
