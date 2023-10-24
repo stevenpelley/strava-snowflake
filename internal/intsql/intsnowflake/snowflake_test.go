@@ -90,38 +90,24 @@ func TestMergeActivities(t *testing.T) {
 				where inner.data:"Activity":id::number = outer.data:"Activity":id::number)
 			order by activity_id
 			;`, testTable),
-
-			fmt.Sprintf(`
-			with my_etl as (
-			select
-				*
-			from %[1]v as outer
-			where etl_id = (
-				select max(etl_id)
-				from %[1]v as inner
-				where inner.data:"Activity":id::number = outer.data:"Activity":id::number)
-			  ), times as (
-				select
-				etl_id,
-				data:"Activity":"id"::number as activity_id,
-				f.value as time,
-				f.index as idx
-				from my_etl, table(flatten(data:"StreamSet":"time":"data")) as f
-			  ), watts as (
-				select
-				etl_id,
-				data:"Activity":"id"::number as activity_id,
-				f.value as watts,
-				f.index as idx
-				from my_etl, table(flatten(data:"StreamSet":"watts":"data")) as f
-			  )
-			  select
-				coalesce(times.etl_id, watts.etl_id) as etl_id,
-				coalesce(times.activity_id, watts.activity_id) as activity_id,
-				times.time,
-				watts.watts
-			  from times full outer join watts on times.etl_id = watts.etl_id and times.activity_id = watts.activity_id and times.idx = watts.idx
-			  order by activity_id, time
-			  ;`, testTable))
+			fmt.Sprintf(
+				`
+				with my_etl as (
+					select *
+					from %[1]v as outside
+					where etl_id = (
+					  select max(inside.etl_id)
+					  from %[1]v as inside
+					  where inside.data:"Activity":"id"::number = outside.data:"Activity":"id"::number)
+				  )
+				  select
+					etl_id,
+					data:"Activity":"id"::number as activity_id,
+					f.value as time,
+					get(data:"StreamSet":watts:data, f.index)::double as watts
+				  from my_etl, table(flatten(INPUT => data:"StreamSet", PATH => 'time.data')) as f
+				  order by activity_id, time
+				  ;
+				`, testTable))
 	})
 }
