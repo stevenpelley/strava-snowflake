@@ -49,14 +49,42 @@ func DBTest(t *testing.T, testFile string, closeDb closeDb, f func(sdb *DuckdbSt
 func TestUploadActivityJson(t *testing.T) {
 	testFile := ""
 	DBTest(t, testFile, Close, func(sdb *DuckdbStrava) {
-		intsql.HelperTestUploadActivityJson(t, sdb)
+		require := require.New(t)
+		s1 := `{"Activity":{"id":10}}`
+		s2 := `{"Activity":{"id":20}}`
+		// interface for comparison with generically scanned data
+		ss := []string{s1, s2}
+		require.NoError(sdb.UploadActivityJson(intsql.ToJsonables(
+			[]intsql.StringJsonable{intsql.StringJsonable(s1), intsql.StringJsonable(s2)})))
+
+		rows, err := sdb.DB().Query(`select * from temp_etl;`)
+		require.NoError(err)
+		defer rows.Close()
+		intsql.ScanColumnsAndCompare(t, rows, ss)
+
+		rows, err = sdb.DB().Query(`select * from etl;`)
+		require.NoError(err)
+		defer rows.Close()
+
+		ss = []string{s1, s2}
+		expectedEtlIds := []int64{int64(1), int64(2)}
+		expectedActivityIds := []int64{int64(10), int64(20)}
+		intsql.ScanColumnsAndCompare(t, rows, expectedEtlIds, expectedActivityIds, ss)
 	})
 }
 
 func TestMergeActivities(t *testing.T) {
 	testFile := ""
 	DBTest(t, testFile, Close, func(sdb *DuckdbStrava) {
-		intsql.HelperTestMergeActivities(t, sdb)
+		intsql.HelperTestMergeActivities(
+			t,
+			sdb,
+			`select etl_id, activity_id, activity.id, streamset.watts.resolution
+			from activities
+			order by activity_id;`,
+			`select etl_id, activity_id, time, watts
+			from streams
+			order by activity_id, time;`)
 	})
 }
 

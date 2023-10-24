@@ -13,13 +13,14 @@ import (
 type SFStrava struct {
 	db             *sql.DB
 	configFileName string
+	etlTableName   string
 }
 
 // prove it is a StravaDatabase
 var _ intsql.StravaDatabase = &SFStrava{}
 
-func New(configFileName string) SFStrava {
-	return SFStrava{configFileName: configFileName}
+func New(configFileName string, etlTableName string) SFStrava {
+	return SFStrava{configFileName: configFileName, etlTableName: etlTableName}
 }
 
 // OpenDB implements intsql.StravaDatabase.
@@ -100,8 +101,10 @@ func (sdb *SFStrava) UploadActivityJson(activities []util.Jsonable) error {
 	}
 	_, err := sdb.db.ExecContext(
 		context.Background(),
-		"insert into etl (data) values (parse_json(?));",
-		s)
+		fmt.Sprintf(
+			`insert into %v (data) select parse_json($1) from values (?);`,
+			sdb.etlTableName),
+		gosnowflake.Array(s))
 	if err != nil {
 		return fmt.Errorf("insert: %w", err)
 	}

@@ -121,6 +121,7 @@ func HelperTestUploadActivityJson(t *testing.T, sdb StravaDatabase) {
 	require.NoError(err)
 	defer rows.Close()
 
+	ss = []string{s1, s2}
 	expectedEtlIds := []int64{int64(1), int64(2)}
 	expectedActivityIds := []int64{int64(10), int64(20)}
 	ScanColumnsAndCompare(t, rows, expectedEtlIds, expectedActivityIds, ss)
@@ -141,15 +142,14 @@ type expectedMergeEffects struct {
 func mergeActivitiesAndAssertEffects(
 	t *testing.T,
 	sdb StravaDatabase,
+	activitiesSql string,
+	streamsSql string,
 	expectedMergeEffects expectedMergeEffects) {
 	require := require.New(t)
 	require.NoError(sdb.MergeActivities())
 
 	// assert activities
-	rows, err := sdb.DB().Query(`
-		select etl_id, activity_id, activity.id, streamset.watts.resolution
-		from activities
-		order by activity_id;`)
+	rows, err := sdb.DB().Query(activitiesSql)
 	require.NoError(err)
 	defer rows.Close()
 
@@ -162,10 +162,7 @@ func mergeActivitiesAndAssertEffects(
 		expectedMergeEffects.resolutions)
 
 	// assert streams
-	rows, err = sdb.DB().Query(`
-		select etl_id, activity_id, time, watts
-		from streams
-		order by activity_id, time;`)
+	rows, err = sdb.DB().Query(streamsSql)
 	require.NoError(err)
 	defer rows.Close()
 
@@ -178,14 +175,18 @@ func mergeActivitiesAndAssertEffects(
 		expectedMergeEffects.streamsWatts)
 }
 
-func HelperTestMergeActivities(t *testing.T, sdb StravaDatabase) {
+func HelperTestMergeActivities(
+	t *testing.T,
+	sdb StravaDatabase,
+	activitiesSql string,
+	streamsSql string) {
 	require := require.New(t)
 	s1 := `{"Activity":{"id":10},"StreamSet":{"watts":{"resolution":"asdf","data":[0, 100, 150]},"time":{"data":[0, 1, 2]}}}`
 	s2 := `{"Activity":{"id":20},"StreamSet":{"watts":{"data":[200, 300, 150]},"time":{"data":[0, 1, 2]}}}`
 	require.NoError(sdb.UploadActivityJson(ToJsonables(
 		[]StringJsonable{StringJsonable(s1), StringJsonable(s2)})))
 
-	mergeActivitiesAndAssertEffects(t, sdb, expectedMergeEffects{
+	mergeActivitiesAndAssertEffects(t, sdb, activitiesSql, streamsSql, expectedMergeEffects{
 		etlIds:             []int64{1, 2},
 		activityIds:        []int64{10, 20},
 		activityIdsFromDoc: []int64{10, 20},
@@ -198,7 +199,7 @@ func HelperTestMergeActivities(t *testing.T, sdb StravaDatabase) {
 	})
 
 	// should be idempotent
-	mergeActivitiesAndAssertEffects(t, sdb, expectedMergeEffects{
+	mergeActivitiesAndAssertEffects(t, sdb, activitiesSql, streamsSql, expectedMergeEffects{
 		etlIds:             []int64{1, 2},
 		activityIds:        []int64{10, 20},
 		activityIdsFromDoc: []int64{10, 20},
@@ -215,7 +216,7 @@ func HelperTestMergeActivities(t *testing.T, sdb StravaDatabase) {
 	require.NoError(sdb.UploadActivityJson(ToJsonables(
 		[]StringJsonable{StringJsonable(s1), StringJsonable(s3)})))
 
-	mergeActivitiesAndAssertEffects(t, sdb, expectedMergeEffects{
+	mergeActivitiesAndAssertEffects(t, sdb, activitiesSql, streamsSql, expectedMergeEffects{
 		etlIds:             []int64{3, 2, 4},
 		activityIds:        []int64{10, 20, 30},
 		activityIdsFromDoc: []int64{10, 20, 30},
