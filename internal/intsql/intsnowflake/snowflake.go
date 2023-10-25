@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 
 	"github.com/snowflakedb/gosnowflake"
 	"github.com/stevenpelley/strava-snowflake/internal/intsql"
@@ -68,14 +69,21 @@ func (sdb *SFStrava) FilterKnownActivityIds(activityIds []int64) ([]int64, error
 	}
 
 	_, err = conn.ExecContext(
-		context.Background(), "insert into activity_ids values (?);", activityIds)
+		context.Background(), "insert into activity_ids values (?);", gosnowflake.Array(activityIds))
 	if err != nil {
 		return nil, fmt.Errorf("insert activity ids: %w", err)
 	}
 
-	rows, err := conn.QueryContext(
-		context.Background(),
-		"select n from activity_ids where not in (select activity:id::number from etl);")
+	sqlText := fmt.Sprintf(
+		`select n
+		from activity_ids
+		where n not in (
+			select data:Activity:id::number
+			from %v)
+			order by n;`,
+		sdb.etlTableName)
+	slog.Info("query for duplicate activity ids", "sql", sqlText)
+	rows, err := conn.QueryContext(context.Background(), sqlText)
 	if err != nil {
 		return nil, fmt.Errorf("select: %w", err)
 	}
@@ -99,11 +107,13 @@ func (sdb *SFStrava) UploadActivityJson(activities []util.Jsonable) error {
 	for idx, activity := range activities {
 		s[idx] = activity.ToJson()
 	}
+	sqlText := fmt.Sprintf(
+		`insert into %v (data) select parse_json($1) from values (?);`,
+		sdb.etlTableName)
+	slog.Info("query for duplicate activity ids", "sql", sqlText)
 	_, err := sdb.db.ExecContext(
 		context.Background(),
-		fmt.Sprintf(
-			`insert into %v (data) select parse_json($1) from values (?);`,
-			sdb.etlTableName),
+		sqlText,
 		gosnowflake.Array(s))
 	if err != nil {
 		return fmt.Errorf("insert: %w", err)

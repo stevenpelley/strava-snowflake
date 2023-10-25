@@ -71,7 +71,7 @@ func main() {
 
 		if len(activities) == 0 {
 			if getActivitiesErr != nil {
-				log.Panicf(": %v", getActivitiesErr)
+				log.Panicf("GetActivitiesAndStreams: %v", getActivitiesErr)
 			}
 			fmt.Println("no new activities found")
 			return
@@ -81,6 +81,7 @@ func main() {
 		if err != nil {
 			log.Panicf("error loading json: %v", err)
 		}
+		fmt.Printf("uploaded %v activities\n", len(activities))
 	}
 
 	err = sdb.MergeActivities()
@@ -90,7 +91,7 @@ func main() {
 
 	// note any error from acquiring the activities earlier
 	if getActivitiesErr != nil {
-		log.Panicf("error retrieving activities and streams: %v", getActivitiesErr)
+		log.Panicf("GetActivitiesAndStreams, attempted partial result: %v", getActivitiesErr)
 	}
 }
 

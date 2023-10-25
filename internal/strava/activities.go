@@ -251,22 +251,17 @@ func filterActivities(activities []Activity, filter ActivityFilter) ([]Activity,
 	if err != nil {
 		return nil, fmt.Errorf("FilterActivities: %w", err)
 	}
+	activityIdsSet := make(map[int64]struct{})
+	for _, activityId := range activityIds {
+		activityIdsSet[activityId] = struct{}{}
+	}
 
 	// expand ids back to activities
 	results := make([]Activity, 0)
-	nextActivityIdx := 0
-	for _, id := range activityIds {
-		for {
-			if nextActivityIdx >= len(activities) {
-				log.Panicf("failed to match activity ids and activities")
-			}
-
-			if id == activities[nextActivityIdx].GetId() {
-				results = append(results, activities[nextActivityIdx])
-				nextActivityIdx++
-				break
-			}
-			nextActivityIdx++
+	for _, activity := range activities {
+		_, ok := activityIdsSet[*activity.summaryActivity.Id]
+		if ok {
+			results = append(results, activity)
 		}
 	}
 

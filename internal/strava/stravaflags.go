@@ -132,7 +132,7 @@ func (sf *StravaFlags) PostProcessFlags(fs *flag.FlagSet) error {
 	for _, i := range sf.activityIdsToIgnoreSlice {
 		sf.Config.ActivityIdsToIgnore[i] = struct{}{}
 	}
-	slog.Debug("initialized inputs", "slice", sf.activityIdsToIgnoreSlice, "config", sf.Config)
+	slog.Info("initialized inputs", "slice", sf.activityIdsToIgnoreSlice, "config", sf.Config)
 
 	return nil
 }

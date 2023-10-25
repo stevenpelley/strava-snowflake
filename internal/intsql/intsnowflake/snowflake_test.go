@@ -57,17 +57,24 @@ func TestUploadActivityJson(t *testing.T) {
 		s1 := `{"Activity":{"id":10}}`
 		s2 := `{"Activity":{"id":20}}`
 		// interface for comparison with generically scanned data
+		jsonables := []intsql.StringJsonable{intsql.StringJsonable(s1), intsql.StringJsonable(s2)}
 		ss := []string{s1, s2}
-		require.NoError(sdb.UploadActivityJson(intsql.ToJsonables(
-			[]intsql.StringJsonable{intsql.StringJsonable(s1), intsql.StringJsonable(s2)})))
+		require.NoError(sdb.UploadActivityJson(intsql.ToJsonables(jsonables)))
 
 		rows, err := sdb.DB().Query(
 			fmt.Sprintf(
-				`select data::string from %v;`,
+				`select data::string from %v order by data:Activity:id::number;`,
 				testTable))
 		require.NoError(err)
 		defer rows.Close()
 		intsql.ScanColumnsAndCompare(t, rows, ss)
+
+		// now test filter known activity ids.  ids 10 and 20 are already inserted
+		input := []int64{10, 20, 30, 40}
+		expected := []int64{30, 40}
+		result, err := sdb.FilterKnownActivityIds(input)
+		require.NoError(err)
+		require.Equal(expected, result)
 	})
 }
 
