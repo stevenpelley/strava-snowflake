@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/stevenpelley/strava-snowflake/internal/intsql"
 	"github.com/stevenpelley/strava-snowflake/internal/intsql/intduckdb"
+	"github.com/stevenpelley/strava-snowflake/internal/intsql/intsnowflake"
 	"github.com/stevenpelley/strava-snowflake/internal/strava"
 	"github.com/stevenpelley/strava-snowflake/internal/util"
 )
@@ -13,30 +15,40 @@ import (
 func main() {
 	strava.InitLogging("activitiessql.log")
 
+	// first parse global options.  This contains global flags.  Then flag.Args()[0]
+	// contains the subcommand.  flag.Args()[1:] contains "args" to be passed to
+	// FlagSet.Parse().
 	stravaFlags := strava.StravaFlags{}
-	duckdbFlags := intduckdb.DuckdbFlags{}
-	err := util.InitAllFlags(&stravaFlags, &duckdbFlags)
+	err := stravaFlags.InitFlags(flag.CommandLine)
 	if err != nil {
-		log.Panicf("error initializing flags: %v", err)
+		log.Panicf("error preprocessing strava flags: %v", err)
 	}
-
 	var mergeOnly bool
 	flag.BoolVar(&mergeOnly, "mergeonly", false, "if true perform merge from existing data.  Do not retrieve.")
-
 	flag.Parse()
 
-	err = util.PostProcessAllFlags(&stravaFlags, &duckdbFlags)
+	err = stravaFlags.PostProcessFlags(flag.CommandLine)
 	if err != nil {
-		log.Panicf("error postprocessing flags: %v", err)
+		log.Panicf("error postprocessing strava flags: %v", err)
 	}
 
 	config := &stravaFlags.Config
 
-	sdb := intduckdb.New(duckdbFlags.DbFileName)
+	args := flag.Args()
+	if len(args) == 0 {
+		log.Fatal("Please specify a subcommand.")
+	}
+	cmd, args := args[0], args[1:]
+	sdb, err := subcommand(cmd, args)
+	if err != nil {
+		log.Panicf("creating subcommand StravaDatabase: %v", err)
+	}
+
 	err = sdb.OpenDB()
 	if err != nil {
-		log.Panicf("error opening db file %v: %v", duckdbFlags.DbFileName, err)
+		log.Panicf("StravaDatabase.OpenDB: %v", err)
 	}
+
 	defer sdb.Close()
 
 	var getActivitiesErr error
@@ -80,4 +92,20 @@ func main() {
 	if getActivitiesErr != nil {
 		log.Panicf("error retrieving activities and streams: %v", getActivitiesErr)
 	}
+}
+
+func subcommand(cmd string, args []string) (intsql.StravaDatabase, error) {
+	flagSet := flag.NewFlagSet(cmd, flag.ExitOnError)
+	var f intsql.SqlFlags
+	switch cmd {
+	case "duckdb":
+		f = &intduckdb.DuckdbFlags{}
+	case "snowflake":
+		f = &intsnowflake.SFFlags{}
+	}
+
+	f.InitFlags(flagSet)
+	flagSet.Parse(args)
+	f.PostProcessFlags(flagSet)
+	return f.NewStravaDatabase()
 }

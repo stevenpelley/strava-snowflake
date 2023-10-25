@@ -120,5 +120,8 @@ func (sdb *SFStrava) MergeActivities() error {
 
 // Close implements intsql.StravaDatabase.
 func (sdb *SFStrava) Close() error {
+	if sdb.db == nil {
+		return nil
+	}
 	return sdb.db.Close()
 }

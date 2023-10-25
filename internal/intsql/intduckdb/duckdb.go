@@ -212,5 +212,8 @@ func (sdb *DuckdbStrava) MergeActivities() error {
 }
 
 func (sdb *DuckdbStrava) Close() error {
+	if sdb.db == nil {
+		return nil
+	}
 	return sdb.db.Close()
 }

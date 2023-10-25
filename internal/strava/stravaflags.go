@@ -26,7 +26,7 @@ type StravaFlags struct {
 var _ util.Flags = &StravaFlags{}
 
 // must be called before flag.Parse().
-func (sf *StravaFlags) InitFlags() error {
+func (sf *StravaFlags) InitFlags(fs *flag.FlagSet) error {
 	defaultStartDurationAgo, err := time.ParseDuration("-168h")
 	if err != nil {
 		return fmt.Errorf("error construction flag default duration: %w", err)
@@ -90,7 +90,7 @@ func (sf *StravaFlags) InitFlags() error {
 }
 
 // must be called after flag.Parse().  Panics on any error
-func (sf *StravaFlags) PostProcessFlags() error {
+func (sf *StravaFlags) PostProcessFlags(fs *flag.FlagSet) error {
 	if sf.startDurationAgo > 0 {
 		return fmt.Errorf("startDurationAgo must be nonpositive (cannot be in the future): %v",
 			sf.startDurationAgo)

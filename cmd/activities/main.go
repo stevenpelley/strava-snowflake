@@ -14,14 +14,14 @@ func main() {
 	strava.InitLogging("activities.log")
 
 	stravaFlags := strava.StravaFlags{}
-	err := util.InitAllFlags(&stravaFlags)
+	err := stravaFlags.InitFlags(flag.CommandLine)
 	if err != nil {
 		log.Panicf("error initializing flags: %v", err)
 	}
 
 	flag.Parse()
 
-	err = util.PostProcessAllFlags(&stravaFlags)
+	err = stravaFlags.PostProcessFlags(flag.CommandLine)
 	if err != nil {
 		log.Panicf("error postprocessing flags: %v", err)
 	}

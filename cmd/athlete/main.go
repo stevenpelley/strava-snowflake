@@ -7,21 +7,20 @@ import (
 	"log/slog"
 
 	"github.com/stevenpelley/strava-snowflake/internal/strava"
-	"github.com/stevenpelley/strava-snowflake/internal/util"
 )
 
 func main() {
 	strava.InitLogging("athlete.log")
 	// most of these are ignored but this is just a simple demo
 	stravaFlags := strava.StravaFlags{}
-	err := util.InitAllFlags(&stravaFlags)
+	err := stravaFlags.InitFlags(flag.CommandLine)
 	if err != nil {
 		log.Panicf("error initializing flags: %v", err)
 	}
 
 	flag.Parse()
 
-	err = util.PostProcessAllFlags(&stravaFlags)
+	err = stravaFlags.PostProcessFlags(flag.CommandLine)
 	if err != nil {
 		log.Panicf("error postprocessing flags: %v", err)
 	}

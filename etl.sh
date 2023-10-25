@@ -5,4 +5,4 @@ go build ./cmd/activitiessql
 #startdurationago="-$((24*(365*3)))h"
 startdurationago="-$((24*14))h"
 enddurationago="-$((24*(0)))h"
-./activitiessql -startdurationago $startdurationago -enddurationago $enddurationago -duckdbfile strava.duckdb -getstreamsconcurrency 16 -streamstimeoutduration 15m -activitiestimeoutduration 5m
+./activitiessql -startdurationago $startdurationago -enddurationago $enddurationago -getstreamsconcurrency 16 -streamstimeoutduration 15m -activitiestimeoutduration 5m duckdb -duckdbfile strava.duckdb
