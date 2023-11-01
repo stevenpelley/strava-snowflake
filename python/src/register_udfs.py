@@ -1,9 +1,11 @@
 import os
 import json
+import typing
 
 from snowflake.snowpark import functions
 from snowflake.snowpark import Session
 from snowflake.snowpark import types
+from snowflake.snowpark import udtf
 
 from collections.abc import Iterable
 from collections import namedtuple
@@ -29,6 +31,7 @@ streams_struct_type = types.StructType([
     types.StructField('temp', types.LongType()),
     types.StructField('altitude', types.DoubleType()),
 ])
+output_column_names = list([s.lower() for s in streams_struct_type.names])
 
 def create_session():
     # run from project root
@@ -54,89 +57,96 @@ def create_session():
             "private_key":pkb,
         }).create()
 
-def run(session):
-    sess.udf()
-    df1 = sess.sql('select count(*) from strava.activities.etl')
-    df1.show()
+class FlattenStreams(object):
+    def __init__(self):
+        self.mappers = {"lat": operator.itemgetter(0), "lng": operator.itemgetter(1)}
+        self.use_stream_name = {"lat": "latlng", "lng": "latlng"}
 
-def udf_id(session):
-    def udf_def(data: dict) -> int:
-        return data['Activity']['id']
-    my_udf = sess.udf.register(udf_def)
-    sess.table(['STRAVA', 'ACTIVITIES', 'ETL']).select(my_udf(functions.col('DATA'))).limit(5).show()
+    @staticmethod
+    def iter_for_stream(streamset, name, default_length, mapper):
+        stream = streamset.get(name)
+        if stream:
+            return map(mapper, stream['data'])
+        else:
+            return itertools.repeat(None, default_length)
+        
+    def process(self, data) -> Iterable[tuple[int]]:
+        ss = data['StreamSet']
+        assert 'time' in ss
+        default_length = len(ss['time']['data'])
 
-def udtf_name_and_id(session):
-    @functions.udtf(output_schema=['NAME', 'ID'], input_types=[types.VariantType()])
-    class udtf(object):
-        def process(self, data) -> Iterable[tuple[str, int]]:
-            activity = data['Activity']
-            yield (activity['name'], activity['id'],)
-    sess.table(['STRAVA', 'ACTIVITIES', 'ETL']).select(udtf(functions.col('DATA'))).limit(5).show()
+        iters = []
+        for stream in output_column_names:
+            iters.append(self.iter_for_stream(
+                ss,
+                self.use_stream_name.get(stream, stream),
+                default_length,
+                self.mappers.get(stream, lambda x: x)))
+        zipped = zip(*iters, strict=True)
+        for tup in zipped:
+            yield tup
 
-def udtf_flatten_time(session):
-    @functions.udtf(output_schema=['TIME'], input_types=[types.VariantType()])
-    class udtf(object):
-        def process(self, data) -> Iterable[tuple[int]]:
-            l = data['StreamSet']['time']['data']
-            for item in l:
-                yield (item,)
-    the_count = sess.table(['STRAVA', 'ACTIVITIES', 'ETL']).select(udtf(functions.col('DATA'))).count()
-    print(the_count)
+def register_flatten_streams(session, is_permanent=False):
+    kwargs = {}
+    if is_permanent:
+        kwargs = {
+            "name" : ["STRAVA", "UDFS", "FLATTEN_STREAMS"],
+            "is_permanent" : True,
+            "stage_location" : '"STRAVA"."UDFS"."UDF_STAGE"',
+            "replace" : True,
+        }
+        
+    return sess.udtf.register(
+        FlattenStreams,
+        output_schema=streams_struct_type,
+        input_types=[types.VariantType()],
+        **kwargs)
 
-def udtf_flatten_all(session):
-    class udtf(object):
-        @staticmethod
-        def iter_for_stream(streamset, name, default_length):
-            stream = streamset.get(name)
-            if stream:
-                return (stream['data'],)
-            else:
-                return (itertools.repeat(None, default_length),)
+def test_flatten_streams(name_or_udf: typing.Union[str, udtf.UserDefinedTableFunction]):
+    kwargs = {}
+    if isinstance(name_or_udf, str):
+        my_udtf = functions.table_function(name_or_udf)
+    elif isinstance(name_or_udf, udtf.UserDefinedTableFunction):
+        my_udtf = name_or_udf
+    else:
+        raise Exception("unexpected type: {}".format(name_or_udf.__class__.__name__))
 
-        @staticmethod
-        def iter_for_latlng(streamset, default_length):
-            stream = streamset.get('latlng')
-            if stream:
-                (lat, lng) = latlng_iter = itertools.tee(stream['data'], 2)
-                lat = map(operator.itemgetter(0), lat)
-                lng = map(operator.itemgetter(1), lng)
-                return (lat, lng,)
-            else:
-                return (itertools.repeat(None, default_length),
-                        itertools.repeat(None, default_length),)
-            
-            
-        def process(self, data) -> Iterable[tuple[int]]:
-            ss = data['StreamSet']
-
-            default_length = len(ss['time']['data'])
-            zipped = zip(*itertools.chain(
-                self.iter_for_stream(ss, 'time', default_length),
-                self.iter_for_stream(ss, 'watts', default_length),
-                self.iter_for_stream(ss, 'heartrate', default_length),
-                self.iter_for_stream(ss, 'cadence', default_length),
-                self.iter_for_stream(ss, 'velocity_smooth', default_length),
-                self.iter_for_stream(ss, 'grade_smooth', default_length),
-                self.iter_for_stream(ss, 'distance', default_length),
-                self.iter_for_stream(ss, 'moving', default_length),
-                self.iter_for_latlng(ss, default_length),
-                self.iter_for_stream(ss, 'temp', default_length),
-                self.iter_for_stream(ss, 'altitude', default_length),
-                ), strict=True)
-            for tup in zipped:
-                yield tup
-
-    my_udtf = sess.udtf.register(udtf, output_schema=streams_struct_type, input_types=[types.VariantType()])
-    the_count = sess.table(['STRAVA', 'ACTIVITIES', 'ETL']
+    sess.table(['STRAVA', 'ACTIVITIES', 'ETL']
                           ).filter(functions.col('ETL_ID') == 444
                           ).select(functions.col('ETL_ID'), my_udtf(functions.col('DATA'))
                           ).limit(10
                           ).show()
+
+def local_test_flatten_streams():
+    fs = FlattenStreams()
+
+    obj = {"StreamSet": {"time" : {"data" : [1, 2, 3]}, "watts" : {"data" : [100, 101, 102]}}}
+    result = list(fs.process(obj))
+    expected = [(1, 100,) + ((None,) * 10), (2, 101,) + ((None,) * 10), (3, 102,) + ((None,) * 10)]
+    assert result == expected, "expected: {}, found: {}".format(expected, result)
+
+    obj['StreamSet']['latlng'] = {"data": [[10, 20], [11, 21], [12, 22]]}
+    result = list(fs.process(obj))
+    expected2 = [list(e) for e in expected]
+    expected2[0][8] = 10
+    expected2[0][9] = 20
+    expected2[1][8] = 11
+    expected2[1][9] = 21
+    expected2[2][8] = 12
+    expected2[2][9] = 22
+    expected2 = [tuple(l) for l in expected2]
+    assert result == expected2, "expected: {}, found: {}".format(expected2, result)
     
 if __name__ == "__main__":
     sess = create_session()
-    #run(sess)
-    #udf_id(sess)
-    #udtf_name_and_id(sess)
-    #udtf_flatten_time(sess)
-    udtf_flatten_all(sess)
+
+    # something like a unit test
+    #local_test_flatten_streams()
+
+    # anonymous udtf
+    #my_udtf = register_flatten_streams(sess)
+    #test_flatten_streams(my_udtf)
+
+    # named udtf
+    register_flatten_streams(sess, True)
+    test_flatten_streams('"STRAVA"."UDFS"."FLATTEN_STREAMS"')
