@@ -1,3 +1,9 @@
 {
-    "go.toolsEnvVars": {}
+    "go.toolsEnvVars": {},
+    "python.testing.pytestArgs": [
+        "."
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "python.testing.cwd": "${workspaceFolder}/python"
 }
