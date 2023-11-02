@@ -32,7 +32,7 @@ class FlattenStreams(object):
     def _registration_kwargs(is_permanent=False):
         kwargs = {
             "output_schema": FlattenStreams.struct_type,
-            "input_types": [types.VariantType(), types.IntegerType()],
+            "input_types": [types.VariantType(), types.BooleanType(), types.IntegerType()],
         }
         if is_permanent:
             kwargs.update({
@@ -122,7 +122,11 @@ class FlattenStreams(object):
             l[FlattenStreams.inserted_for_gap_idx] = True
             yield tuple(l)
         
-    def process(self, data: dict, seconds_to_add_at_end: int) -> Iterable[tuple[
+    def process(
+            self,
+            data: dict,
+            fill_gaps: bool,
+            seconds_to_add_at_end: int) -> Iterable[tuple[
             int, int, int, int, float, float, float, bool, float, float, int, float, bool]]:
         ss = data['StreamSet']
         assert 'time' in ss, "stream 'time' must exist"
@@ -139,7 +143,6 @@ class FlattenStreams(object):
         iters.append(itertools.repeat(False, default_length))
 
         zipped = zip(*iters, strict=True)
-        yield from FlattenStreams.fill_gaps(
-            zipped,
-            seconds_to_add_at_end,
-        )
+        if fill_gaps:
+            zipped = FlattenStreams.fill_gaps(zipped, seconds_to_add_at_end)
+        yield from zipped

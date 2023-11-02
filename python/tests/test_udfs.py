@@ -19,7 +19,12 @@ def sf_test_flatten_streams(session: Session, name_or_udf: typing.Union[str, udt
 
     c = session.table(['STRAVA', 'ACTIVITIES', 'ETL']
                           ).filter(functions.col('ETL_ID') == 444
-                          ).select(functions.col('ETL_ID'), my_udtf(functions.col('DATA'), functions.lit(2))
+                          ).select(
+                              functions.col('ETL_ID'),
+                              my_udtf(
+                                  functions.col('DATA'),
+                                  functions.lit(True),
+                                  functions.lit(2))
                           ).limit(10
                           ).count()
     assert c == 10, "expected 10, found: {}".format(c)
@@ -42,7 +47,7 @@ def test_unit_flatten_streams():
     fs = src.udfs.FlattenStreams()
 
     obj = {"StreamSet": {"time" : {"data" : [0, 1, 2]}, "watts" : {"data" : [100, 101, 102]}}}
-    result = list(fs.process(obj, 0))
+    result = list(fs.process(obj, False, 0))
     empty_row = (None,) * 13
     expected = [
         tuple(update_list(list(empty_row), [(0, 0,), (1, 100,), (12, False)])),
@@ -52,7 +57,7 @@ def test_unit_flatten_streams():
     assert result == expected, "expected: {}, found: {}".format(expected, result)
 
     obj['StreamSet']['latlng'] = {"data": [[10, 20], [11, 21], [12, 22]]}
-    result = list(fs.process(obj, 0))
+    result = list(fs.process(obj, False, 0))
     expected2 = [list(e) for e in expected]
     expected2[0][8] = 10
     expected2[0][9] = 20
@@ -71,7 +76,7 @@ def test_unit_flatten_streams_with_gaps():
         "watts" : {"data" : [100, 101, 102]},
         "heartrate" : {"data" : [10, 11, 12]},
         }}
-    result = list(fs.process(obj, 2))
+    result = list(fs.process(obj, True, 2))
     empty_row = (None,) * 13
     expected = [
         tuple(update_list(list(empty_row), [(0, 0,), (1, 100,), (2, 10,), (12, False)])),
@@ -92,7 +97,7 @@ def test_unit_flatten_streams_errors():
             match="FlattenStream.fill_gaps input iterator requires at least 1 item"):
         fs = src.udfs.FlattenStreams()
         obj = {"StreamSet": {"time" : {"data" : []}}}
-        result = list(fs.process(obj, 0))
+        result = list(fs.process(obj, True, 0))
 
     # time stream must exist
     with pytest.raises(
@@ -100,7 +105,7 @@ def test_unit_flatten_streams_errors():
             match="stream 'time' must exist"):
         fs = src.udfs.FlattenStreams()
         obj = {"StreamSet": {"watts" : {"data" : [100]}}}
-        result = list(fs.process(obj, 0))
+        result = list(fs.process(obj, True, 0))
 
     # streams must be same length
     with pytest.raises(
@@ -108,7 +113,7 @@ def test_unit_flatten_streams_errors():
             match="zip\(\) argument [0-9]+ is shorter than argument [0-9]+"):
         fs = src.udfs.FlattenStreams()
         obj = {"StreamSet": {"time" : {"data" : [0, 2, 1]}, "watts": {"data" : [100]}}}
-        result = list(fs.process(obj, 0))
+        result = list(fs.process(obj, True, 0))
     
     # first time must be 0
     with pytest.raises(
@@ -116,7 +121,7 @@ def test_unit_flatten_streams_errors():
             match="FlattenStream.fill_gaps first tuple's time must be 0.  Found: 2"):
         fs = src.udfs.FlattenStreams()
         obj = {"StreamSet": {"time" : {"data" : [2]}}}
-        result = list(fs.process(obj, 0))
+        result = list(fs.process(obj, True, 0))
     
     # times must increase monotonically
     #                "expecting time to increase row-to-row.  Previous: {}, This: {}"
@@ -125,4 +130,4 @@ def test_unit_flatten_streams_errors():
             match="expecting time to increase row-to-row.  Previous: 2, This: 1"):
         fs = src.udfs.FlattenStreams()
         obj = {"StreamSet": {"time" : {"data" : [0, 2, 1]}}}
-        result = list(fs.process(obj, 0))
+        result = list(fs.process(obj, True, 0))
