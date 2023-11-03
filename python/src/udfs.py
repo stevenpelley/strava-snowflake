@@ -28,6 +28,8 @@ class FlattenStreams(object):
     watts_idx = stream_names.index("watts")
     inserted_for_gap_idx = len(stream_names)
 
+    registered_name_tup = ["STRAVA", "UDFS", "FLATTEN_STREAMS"]
+
     @staticmethod
     def _registration_kwargs(is_permanent=False):
         kwargs = {
@@ -36,7 +38,7 @@ class FlattenStreams(object):
         }
         if is_permanent:
             kwargs.update({
-                "name" : ["STRAVA", "UDFS", "FLATTEN_STREAMS"],
+                "name" : FlattenStreams.registered_name_tup,
                 "is_permanent" : True,
                 "stage_location" : '"STRAVA"."UDFS"."UDF_STAGE"',
                 "replace" : True,

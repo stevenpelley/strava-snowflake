@@ -5,15 +5,17 @@ copy github.com/stevenpelley/strava3golang/oauth_client_config.json and the resu
 Also needs snowflake key pair credentials placed in snowflake_config (see template)
 
 state:
-snowflake passes simple tests
+passing tests for both duckdb and snowflake
 downloads activities within time range from strava
 skips retrieving streams for activities already in database or listed in command line options
 stores and transforms data in duckdb.
-connection demo working in snowflake
+python snowpark udfs organized, flatten_streams written and tested.  Additionally fills time gaps.
 
 todo:
-update activitiessql cmd to use snowflake
 snowpark for data cleaning and bike stress
+- create CLI command to register udfs
+- create exponentially weighted average udf
+
 use terraform for reproducible snowflake and schema creation.
 try out snowflake builtin dashboarding
 try out some other dashboard options (superset, mesosphere)

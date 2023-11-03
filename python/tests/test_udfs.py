@@ -1,12 +1,34 @@
 import src.connect
 import src.udfs
 
+import copy
+import json
 import pytest
+import operator
 import typing
 
 from snowflake.snowpark import functions
 from snowflake.snowpark import Session
 from snowflake.snowpark import udtf
+
+def sf_create_test_data(session:Session) -> None:
+    session.connection.cursor().execute(
+        "create temp table strava.activities_test.etl_test (etl_id number, data variant);")
+
+    base_obj = {"Activity": {"id": 0}, "StreamSet": {"time": {"data": []}, "watts": {"data": []}}}
+    obj1 = copy.deepcopy(base_obj)
+    obj1['Activity']['id'] = 100
+    obj1['StreamSet']['time']['data'].extend([0, 1, 2, 3])
+    obj1['StreamSet']['watts']['data'].extend([10, 20, 30, 40])
+    obj2 = copy.deepcopy(base_obj)
+    obj1['Activity']['id'] = 200
+    obj2['StreamSet']['time']['data'].extend([0, 1, 2, 10, 11])
+    obj2['StreamSet']['watts']['data'].extend([50, 50, 0, 0, 40])
+
+    session.connection.cursor().execute(
+        ("insert into strava.activities_test.etl_test select $1, "
+                "parse_json($2) from values (1, '{}'), (2, '{}')").format(
+        json.dumps(obj1), json.dumps(obj2)))
 
 def sf_test_flatten_streams(session: Session, name_or_udf: typing.Union[str, udtf.UserDefinedTableFunction]):
     kwargs = {}
@@ -17,26 +39,56 @@ def sf_test_flatten_streams(session: Session, name_or_udf: typing.Union[str, udt
     else:
         raise Exception("unexpected type: {}".format(name_or_udf.__class__.__name__))
 
-    c = session.table(['STRAVA', 'ACTIVITIES', 'ETL']
-                          ).filter(functions.col('ETL_ID') == 444
+    results = session.table(['STRAVA', 'ACTIVITIES_TEST', 'ETL_TEST']
                           ).select(
                               functions.col('ETL_ID'),
                               my_udtf(
                                   functions.col('DATA'),
                                   functions.lit(True),
                                   functions.lit(2))
-                          ).limit(10
-                          ).count()
-    assert c == 10, "expected 10, found: {}".format(c)
+                          ).sort(functions.col('etl_id'), functions.col('time')).collect()
+
+    # look only at etl_id, time, watts, heartrate, and inserted_for_gap
+    results = list(map(
+        operator.itemgetter('ETL_ID','TIME','WATTS','HEARTRATE','INSERTED_FOR_GAP'),
+        results))
+    assert results == [
+        (1, 0, 10, None, False,),
+        (1, 1, 20, None, False,),
+        (1, 2, 30, None, False,),
+        (1, 3, 40, None, False,),
+        (1, 4, 0, None, True,),
+        (1, 5, 0, None, True,),
+        (2, 0, 50, None, False,),
+        (2, 1, 50, None, False,),
+        (2, 2, 0, None, False,),
+        (2, 3, 0, None, True,),
+        (2, 4, 0, None, True,),
+        (2, 5, 0, None, True,),
+        (2, 6, 0, None, True,),
+        (2, 7, 0, None, True,),
+        (2, 8, 0, None, True,),
+        (2, 9, 0, None, True,),
+        (2, 10, 0, None, False,),
+        (2, 11, 40, None, False,),
+        (2, 12, 0, None, True,),
+        (2, 13, 0, None, True,),
+    ]
 
 def test_sf_flatten_streams():
-    # anonymous
     session = src.connect.create_session()
+    sf_create_test_data(session)
+
+    # anonymous
     udf = src.udfs.FlattenStreams.register(session)
     sf_test_flatten_streams(session, udf)
     
-    #named
-    pass
+    # named
+    # TODO: delete the function and associated stage files.  Right now we overwrite them
+    # each time so size should never grow
+    udf = src.udfs.FlattenStreams.register(session, is_permanent=True)
+    # passing a string calls the named function
+    sf_test_flatten_streams(session, ".".join(src.udfs.FlattenStreams.registered_name_tup))
 
 def update_list(l, tups):
     for (idx, val,) in tups:
