@@ -5,12 +5,23 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "Python2",
             "type": "python",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": true
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}/python",
+            "purpose": ["debug-test"],
+            "redirectOutput": true
+        },
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "justMyCode": false,
+            "redirectOutput": true
         },
         {
             "name": "Launch Package",

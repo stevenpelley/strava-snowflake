@@ -1,5 +1,5 @@
 import src.connect
-import src.udfs
+import src.flatten_streams_udf
 
 import copy
 import json
@@ -31,7 +31,6 @@ def sf_create_test_data(session:Session) -> None:
         json.dumps(obj1), json.dumps(obj2)))
 
 def sf_test_flatten_streams(session: Session, name_or_udf: typing.Union[str, udtf.UserDefinedTableFunction]):
-    kwargs = {}
     if isinstance(name_or_udf, str):
         my_udtf = functions.table_function(name_or_udf)
     elif isinstance(name_or_udf, udtf.UserDefinedTableFunction):
@@ -80,15 +79,15 @@ def test_sf_flatten_streams():
     sf_create_test_data(session)
 
     # anonymous
-    udf = src.udfs.FlattenStreams.register(session)
+    udf = src.flatten_streams_udf.FlattenStreams.register(session)
     sf_test_flatten_streams(session, udf)
     
     # named
     # TODO: delete the function and associated stage files.  Right now we overwrite them
     # each time so size should never grow
-    udf = src.udfs.FlattenStreams.register(session, is_permanent=True)
+    udf = src.flatten_streams_udf.FlattenStreams.register(session, is_permanent=True)
     # passing a string calls the named function
-    sf_test_flatten_streams(session, ".".join(src.udfs.FlattenStreams.registered_name_tup))
+    sf_test_flatten_streams(session, ".".join(src.flatten_streams_udf.FlattenStreams.registered_name_tup))
 
 def update_list(l, tups):
     for (idx, val,) in tups:
@@ -96,7 +95,7 @@ def update_list(l, tups):
     return l
 
 def test_unit_flatten_streams():
-    fs = src.udfs.FlattenStreams()
+    fs = src.flatten_streams_udf.FlattenStreams()
 
     obj = {"StreamSet": {"time" : {"data" : [0, 1, 2]}, "watts" : {"data" : [100, 101, 102]}}}
     result = list(fs.process(obj, False, 0))
@@ -121,7 +120,7 @@ def test_unit_flatten_streams():
     assert result == expected2, "expected: {}, found: {}".format(expected2, result)
 
 def test_unit_flatten_streams_with_gaps():
-    fs = src.udfs.FlattenStreams()
+    fs = src.flatten_streams_udf.FlattenStreams()
 
     obj = {"StreamSet": {
         "time" : {"data" : [0, 1, 5]},
@@ -147,7 +146,7 @@ def test_unit_flatten_streams_errors():
     with pytest.raises(
             Exception,
             match="FlattenStream.fill_gaps input iterator requires at least 1 item"):
-        fs = src.udfs.FlattenStreams()
+        fs = src.flatten_streams_udf.FlattenStreams()
         obj = {"StreamSet": {"time" : {"data" : []}}}
         result = list(fs.process(obj, True, 0))
 
@@ -155,7 +154,7 @@ def test_unit_flatten_streams_errors():
     with pytest.raises(
             AssertionError,
             match="stream 'time' must exist"):
-        fs = src.udfs.FlattenStreams()
+        fs = src.flatten_streams_udf.FlattenStreams()
         obj = {"StreamSet": {"watts" : {"data" : [100]}}}
         result = list(fs.process(obj, True, 0))
 
@@ -163,7 +162,7 @@ def test_unit_flatten_streams_errors():
     with pytest.raises(
             ValueError,
             match="zip\(\) argument [0-9]+ is shorter than argument [0-9]+"):
-        fs = src.udfs.FlattenStreams()
+        fs = src.flatten_streams_udf.FlattenStreams()
         obj = {"StreamSet": {"time" : {"data" : [0, 2, 1]}, "watts": {"data" : [100]}}}
         result = list(fs.process(obj, True, 0))
     
@@ -171,7 +170,7 @@ def test_unit_flatten_streams_errors():
     with pytest.raises(
             AssertionError,
             match="FlattenStream.fill_gaps first tuple's time must be 0.  Found: 2"):
-        fs = src.udfs.FlattenStreams()
+        fs = src.flatten_streams_udf.FlattenStreams()
         obj = {"StreamSet": {"time" : {"data" : [2]}}}
         result = list(fs.process(obj, True, 0))
     
@@ -180,6 +179,6 @@ def test_unit_flatten_streams_errors():
     with pytest.raises(
             AssertionError,
             match="expecting time to increase row-to-row.  Previous: 2, This: 1"):
-        fs = src.udfs.FlattenStreams()
+        fs = src.flatten_streams_udf.FlattenStreams()
         obj = {"StreamSet": {"time" : {"data" : [0, 2, 1]}}}
         result = list(fs.process(obj, True, 0))

@@ -1,7 +1,6 @@
 {
     "go.toolsEnvVars": {},
     "python.testing.pytestArgs": [
-        "--tb=auto",
         "."
     ],
     "python.testing.unittestEnabled": false,

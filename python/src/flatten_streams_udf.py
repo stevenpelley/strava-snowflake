@@ -35,6 +35,7 @@ class FlattenStreams(object):
         kwargs = {
             "output_schema": FlattenStreams.struct_type,
             "input_types": [types.VariantType(), types.BooleanType(), types.IntegerType()],
+            "input_names": ["DATA", "FILL_GAPS", "SECONDS_TO_ADD_AT_END"]
         }
         if is_permanent:
             kwargs.update({

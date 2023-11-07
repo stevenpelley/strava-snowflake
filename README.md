@@ -10,11 +10,13 @@ downloads activities within time range from strava
 skips retrieving streams for activities already in database or listed in command line options
 stores and transforms data in duckdb.
 python snowpark udfs organized, flatten_streams written and tested.  Additionally fills time gaps.
+vectorized emwa done.  Surprisingly slow.
 
 todo:
 snowpark for data cleaning and bike stress
-- create CLI command to register udfs
-- create exponentially weighted average udf
+- create non-vectorized exponentially weighted average udf to compare performance
+- figure out how to manage stages.  Want to make sure we don't leak files, especially for tests.  Maybe a task to delete files older than 1 day for a "tmp" stage?  Do I need directory table or can I get this some other way (get scoped creds for the stage)?
+- create CLI command to register udfs.  Create functions from the same artifact?
 
 use terraform for reproducible snowflake and schema creation.
 try out snowflake builtin dashboarding

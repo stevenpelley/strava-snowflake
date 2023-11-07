@@ -17,6 +17,7 @@ pytest = "*"
 pytest-cov = "*"
 jsonschema = "*"
 snowflake-snowpark-python = "*"
+pandas = "*"
 
 [requires]
 python_version = "3.11"

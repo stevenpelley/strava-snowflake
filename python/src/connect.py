@@ -32,4 +32,6 @@ def create_session():
         }).create()
     sess.add_import('src/')
     sess.add_packages('snowflake-snowpark-python')
+    sess.add_packages('pandas')
+    sess.add_packages('pyarrow')
     return sess
