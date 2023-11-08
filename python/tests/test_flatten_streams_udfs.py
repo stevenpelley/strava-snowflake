@@ -75,19 +75,19 @@ def sf_test_flatten_streams(session: Session, name_or_udf: typing.Union[str, udt
     ]
 
 def test_sf_flatten_streams():
-    session = src.connect.create_session()
-    sf_create_test_data(session)
+    with src.connect.create_session() as session:
+        sf_create_test_data(session)
 
-    # anonymous
-    udf = src.flatten_streams_udf.FlattenStreams.register(session)
-    sf_test_flatten_streams(session, udf)
-    
-    # named
-    # TODO: delete the function and associated stage files.  Right now we overwrite them
-    # each time so size should never grow
-    udf = src.flatten_streams_udf.FlattenStreams.register(session, is_permanent=True)
-    # passing a string calls the named function
-    sf_test_flatten_streams(session, ".".join(src.flatten_streams_udf.FlattenStreams.registered_name_tup))
+        # anonymous
+        udf = src.flatten_streams_udf.FlattenStreams.register(session)
+        sf_test_flatten_streams(session, udf)
+        
+        # named
+        # TODO: delete the function and associated stage files.  Right now we overwrite them
+        # each time so size should never grow
+        udf = src.flatten_streams_udf.FlattenStreams.register(session, is_permanent=True)
+        # passing a string calls the named function
+        sf_test_flatten_streams(session, ".".join(src.flatten_streams_udf.FlattenStreams.registered_name_tup))
 
 def update_list(l, tups):
     for (idx, val,) in tups:

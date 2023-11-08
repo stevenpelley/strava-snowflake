@@ -10,5 +10,5 @@ def register_udtfs(session: snowflake.snowpark.Session):
     EWMA_NV.register(session, is_permanent=True)
 
 if __name__=="__main__":
-    session = create_session()
-    register_udtfs(session)
+    with create_session() as session:
+        register_udtfs(session)

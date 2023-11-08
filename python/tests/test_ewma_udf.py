@@ -11,11 +11,11 @@ import typing
 
 
 def test_sf_ewma() -> None:
-    session = src.connect.create_session()
-    sf_create_test_data(session)
-    # anonymous
-    udf = src.ewma_udf.EWMA.register(session)
-    sf_test_ewma(session, udf)
+    with src.connect.create_session() as session:
+        sf_create_test_data(session)
+        # anonymous
+        udf = src.ewma_udf.EWMA.register(session)
+        sf_test_ewma(session, udf)
 
 def get_test_data() -> list[tuple[int, int, int]]:
     return [
